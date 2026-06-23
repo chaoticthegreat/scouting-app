@@ -16,6 +16,16 @@ export class ScoutingDb extends Dexie {
 
 export const db = new ScoutingDb();
 
+// Tolerate rows written before rowRevision/syncAttempts/lastSyncError existed.
+function withSyncDefaults(r: LocalMatchReport): LocalMatchReport {
+  return {
+    ...r,
+    rowRevision: r.rowRevision ?? 1,
+    syncAttempts: r.syncAttempts ?? 0,
+    lastSyncError: r.lastSyncError ?? null,
+  };
+}
+
 export async function saveReport(r: LocalMatchReport): Promise<void> {
   const record: LocalMatchReport = { ...r, syncState: r.syncState ?? 'dirty' };
   await db.reports.put(record);
@@ -27,7 +37,7 @@ export async function listReports(): Promise<LocalMatchReport[]> {
 
 export async function getUnsynced(): Promise<LocalMatchReport[]> {
   const all = await db.reports.toArray();
-  return all.filter((r) => r.syncState !== 'synced');
+  return all.filter((r) => r.syncState !== 'synced').map(withSyncDefaults);
 }
 
 export async function countUnsynced(): Promise<number> {
@@ -37,6 +47,51 @@ export async function countUnsynced(): Promise<number> {
 
 export async function markSynced(id: string): Promise<void> {
   await db.reports.update(id, { syncState: 'synced' });
+}
+
+// Upload in flight: set immediately before the RPC call.
+export async function markPending(id: string): Promise<void> {
+  await db.reports.update(id, { syncState: 'pending' });
+}
+
+// DEAD-LETTER: terminal failure; NOT auto-retried, surfaced in the UI.
+export async function markSyncError(id: string, message: string): Promise<void> {
+  await db.reports.update(id, { syncState: 'error', lastSyncError: message });
+}
+
+// Transient failure: back to the queue, bump the attempt counter for backoff.
+export async function markDirtyRetry(id: string, message: string): Promise<void> {
+  const existing = await db.reports.get(id);
+  const attempts = (existing?.syncAttempts ?? 0) + 1;
+  await db.reports.update(id, {
+    syncState: 'dirty',
+    syncAttempts: attempts,
+    lastSyncError: message,
+  });
+}
+
+// Auto-retry worklist: dirty + pending, oldest first; EXCLUDES 'error' and 'synced'.
+export async function getSyncQueue(): Promise<LocalMatchReport[]> {
+  const all = await db.reports.toArray();
+  return all
+    .filter((r) => r.syncState === 'dirty' || r.syncState === 'pending')
+    .map(withSyncDefaults)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+// Dead-letters for the UI / manual retry.
+export async function listDeadLetters(): Promise<LocalMatchReport[]> {
+  const all = await db.reports.toArray();
+  return all.filter((r) => r.syncState === 'error').map(withSyncDefaults);
+}
+
+// Reset a dead-letter to 'dirty' for a manual retry.
+export async function requeueReport(id: string): Promise<void> {
+  await db.reports.update(id, {
+    syncState: 'dirty',
+    syncAttempts: 0,
+    lastSyncError: null,
+  });
 }
 
 export async function saveDraft(draftKey: string, state: unknown): Promise<void> {

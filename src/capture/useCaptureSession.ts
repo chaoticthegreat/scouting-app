@@ -241,6 +241,9 @@ export function useCaptureSession(target: CaptureTarget) {
       // Rate-derived fuel estimate -> low confidence.
       fuelEstimateConfidence: 0.3,
       syncState: 'dirty',
+      rowRevision: 1,
+      syncAttempts: 0,
+      lastSyncError: null,
     };
     await saveReport(report);
     await deleteDraft(draftKey);

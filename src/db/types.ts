@@ -43,6 +43,9 @@ export interface LocalMatchReport {
   fedCorral: boolean;
   notes: string;
   syncState: 'dirty' | 'pending' | 'synced' | 'error';
+  rowRevision: number;
+  syncAttempts: number;
+  lastSyncError: string | null;
 }
 
 export interface CaptureDraft {

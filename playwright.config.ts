@@ -11,6 +11,7 @@ export default defineConfig({
   retries: 0,
   use: {
     baseURL: BASE_URL,
+    headless: true,
     trace: 'on-first-retry',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],

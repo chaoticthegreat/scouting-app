@@ -1,7 +1,5 @@
-export default function App() {
-  return (
-    <main>
-      <h1>3256 Scouting</h1>
-    </main>
-  );
+import { AppRouter } from './routes/router';
+
+export default function App(): JSX.Element {
+  return <AppRouter />;
 }

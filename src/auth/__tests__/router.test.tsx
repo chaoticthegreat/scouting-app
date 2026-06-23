@@ -1,0 +1,38 @@
+// src/auth/__tests__/router.test.tsx
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+
+// Force a "no scout" session so guards redirect predictably.
+vi.mock('../useSession', () => ({
+  useSession: () => ({ loading: false, scout: null, role: null }),
+}));
+
+import { routes } from '../../routes/router';
+
+function renderAt(path: string) {
+  const r = createMemoryRouter(routes, { initialEntries: [path] });
+  return render(<RouterProvider router={r} />);
+}
+
+describe('router', () => {
+  it('serves /join publicly', () => {
+    renderAt('/join');
+    expect(screen.getByTestId('join-submit')).toBeInTheDocument();
+  });
+
+  it('guards /scout -> /join when no scout', () => {
+    renderAt('/scout');
+    expect(screen.getByTestId('join-submit')).toBeInTheDocument();
+  });
+
+  it('guards /admin -> /join when no scout', () => {
+    renderAt('/admin');
+    expect(screen.getByTestId('join-submit')).toBeInTheDocument();
+  });
+
+  it('redirects / to a guarded route (lands on /join when unauthenticated)', () => {
+    renderAt('/');
+    expect(screen.getByTestId('join-submit')).toBeInTheDocument();
+  });
+});

@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [react(), VitePWA({ registerType: 'autoUpdate' })],
   test: {
     globals: true,
-    environment: 'jsdom',
+    environment: './vitest-env-jsdom-compat.ts',
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}', 'tests/db/**/*.test.ts', 'tests/functions/**/*.test.ts'],
     exclude: ['tests/e2e/**', 'node_modules/**'],

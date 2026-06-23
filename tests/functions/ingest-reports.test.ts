@@ -118,8 +118,12 @@ describe("ingest-reports (deployed)", () => {
     expect(body.ingested).toBe(0);
   }, 30000);
 
-  it("ingests a valid report (ingested:1) and row exists with aggregates", async () => {
-    // fuel_bursts is a valid JSONB array (shift/count/source entries)
+  it("ingests a valid report (ingested:1) and row exists with correct recomputed aggregates", async () => {
+    // Use the frozen FuelBurst shape: { startMs, endMs, rate, window }
+    // Known set: auto burst 0..10000ms @2.0/s = 20.0 fuel (auto_fuel=20)
+    //            shift1 burst 10000..20000ms @1.0/s = 10.0 fuel (shift1=10)
+    // inactive_first: false → shift1 is ACTIVE (odd shifts active when inactiveFirst=false)
+    // fuelPoints = auto(20) + shift1(10) = 30 (FUEL_POINTS=1, transition=0, endgame=0, shift2/3/4=0)
     const report = {
       id: TEST_REPORT_ID,
       schema_version: 1,
@@ -131,7 +135,11 @@ describe("ingest-reports (deployed)", () => {
       target_team_number: TEST_TEAM_NUMBER,
       alliance_color: "red",
       station: 1,
-      fuel_bursts: [{ shift: 0, count: 3, source: "floor" }],
+      inactive_first: false,
+      fuel_bursts: [
+        { startMs: 0, endMs: 10000, rate: 2.0, window: "auto" },
+        { startMs: 10000, endMs: 20000, rate: 1.0, window: "shift1" },
+      ],
       row_revision: 1,
     };
     const reports = [report];
@@ -150,16 +158,18 @@ describe("ingest-reports (deployed)", () => {
     const body = await res.json();
     expect(body.ingested).toBe(1);
 
-    // Verify the row exists in the DB
+    // Verify the row exists and recomputed aggregates are correct
     const { data, error } = await admin
       .from("match_scouting_report")
-      .select("id, event_key, match_key, target_team_number, fuel_bursts")
+      .select("id, event_key, match_key, target_team_number, fuel_bursts, auto_fuel, fuel_points")
       .eq("id", TEST_REPORT_ID)
       .single();
     expect(error).toBeNull();
     expect(data?.id).toBe(TEST_REPORT_ID);
     expect(data?.event_key).toBe(TEST_EVENT_KEY);
-    // aggregates recomputed: fuel_bursts stored
+    // recomputed aggregates must match the golden values
+    expect(data?.auto_fuel).toBe(20);   // 0..10000ms @2.0/s = 20.0 → rounds to 20
+    expect(data?.fuel_points).toBe(30); // active fuel = auto(20) + shift1(10) = 30
     expect(Array.isArray(data?.fuel_bursts)).toBe(true);
   }, 30000);
 

@@ -19,3 +19,4 @@ test-results
 .env.*
 !.env.example
 /FE-2026-_REBUILT_Playing_Field_With_Fuel_With_Background.png
+supabase/.temp/

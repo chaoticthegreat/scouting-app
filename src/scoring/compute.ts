@@ -1,7 +1,7 @@
 // src/scoring/compute.ts
 import type { MatchReportInputs, MatchReportAggregates, MatchWindow } from './types';
 import { SCORING } from './constants';
-import { isWindowActive, shiftNumberOf } from './windows';
+import { isWindowActive } from './windows';
 
 // Round half-up: 0.5 -> 1, 2.5 -> 3, -0.5 -> 0. Math.round already rounds
 // half toward +Infinity for non-negative values, which is what we need here
@@ -51,13 +51,11 @@ export function computeAggregates(input: MatchReportInputs): MatchReportAggregat
   let teleopFuelActive = roundedByWindow.transition; // transition is always active teleop
   let teleopFuelInactive = 0;
   for (const w of ['shift1', 'shift2', 'shift3', 'shift4'] as const) {
-    const n = shiftNumberOf(w)!;
     if (isWindowActive(w, input.inactiveFirst)) {
       teleopFuelActive += roundedByWindow[w];
     } else {
       teleopFuelInactive += roundedByWindow[w];
     }
-    void n;
   }
 
   // fuelPoints = sum of rounded fuel in ACTIVE windows * FUEL_POINTS.

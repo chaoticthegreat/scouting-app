@@ -98,3 +98,70 @@ describe('computeAggregates — round-half-up boundary (.5 always up, not banker
     });
   });
 });
+
+describe('computeAggregates — inactiveFirst:false inverts active/inactive shift attribution', () => {
+  // Same 8 bursts as the inactiveFirst:true golden above, but inactiveFirst=false.
+  // With inactiveFirst:false: odd shifts (shift1,shift3) are ACTIVE; even (shift2,shift4) INACTIVE.
+  // isInactive(n, inactiveFirst) = ((n % 2) === 1) === inactiveFirst
+  //   shift1: ((1%2)===1)===false → 1===false → false → ACTIVE
+  //   shift2: ((2%2)===1)===false → 0===false → false → ACTIVE? No: isInactive=false → isWindowActive=true (active)
+  //   Wait: isWindowActive = !isInactive(n, inactiveFirst)
+  //   shift1: isInactive(1, false) = (1===false) = false → isWindowActive = !false = true (ACTIVE)
+  //   shift2: isInactive(2, false) = (0===false) = false → isWindowActive = true (ACTIVE)?
+  //   That can't be right. Re-check: isInactive = ((n % 2) === 1) === inactiveFirst
+  //   shift2: ((2 % 2) === 1) === false = (0 === 1) === false = false === false = true → isInactive=true → INACTIVE
+  //   shift1: ((1 % 2) === 1) === false = (1 === 1) === false = true === false = false → isInactive=false → ACTIVE
+  //   shift3: ((3 % 2) === 1) === false = true === false = false → ACTIVE
+  //   shift4: ((4 % 2) === 1) === false = false === false = true → INACTIVE
+  // So with inactiveFirst:false: shift1 & shift3 ACTIVE; shift2 & shift4 INACTIVE.
+  const input: MatchReportInputs = {
+    schemaVersion: 1,
+    inactiveFirst: false, // shift1 & shift3 ACTIVE; shift2 & shift4 INACTIVE
+    climbLevel: 0,
+    autoClimbLevel1: false,
+    fuelBursts: [
+      // auto: 4.5 fuel -> rounds half-up to 5
+      { startMs: 0, endMs: 9000, rate: 0.5, window: 'auto' },
+      // transition: 2.5 fuel -> rounds half-up to 3
+      { startMs: 0, endMs: 5000, rate: 0.5, window: 'transition' },
+      // shift1 (ACTIVE): float = 4.0 + 1.5 = 5.5 -> 6
+      { startMs: 8000, endMs: 12000, rate: 1.0, window: 'shift1' },
+      { startMs: 15000, endMs: 18000, rate: 0.5, window: 'shift1' },
+      // shift2 (INACTIVE): 3.5 -> 4
+      { startMs: 35000, endMs: 42000, rate: 0.5, window: 'shift2' },
+      // shift3 (ACTIVE): 2.5 -> 3
+      { startMs: 60000, endMs: 65000, rate: 0.5, window: 'shift3' },
+      // shift4 (INACTIVE): 1.5 -> 2
+      { startMs: 85000, endMs: 88000, rate: 0.5, window: 'shift4' },
+      // endgame: 6.5 -> 7
+      { startMs: 110000, endMs: 123000, rate: 0.5, window: 'endgame' },
+    ],
+  };
+
+  const agg = computeAggregates(input);
+
+  it('auto and endgame fuel unchanged (always active)', () => {
+    expect(agg.autoFuel).toBe(5);
+    expect(agg.endgameFuel).toBe(7);
+  });
+
+  it('fuelByShift unchanged (same burst amounts, different active/inactive label)', () => {
+    // Per-shift rounded amounts are the same regardless of inactiveFirst
+    expect(agg.fuelByShift).toEqual([6, 4, 3, 2]);
+  });
+
+  it('teleopFuelActive = transition + shift1(active) + shift3(active)', () => {
+    // transition 3 + shift1 6 + shift3 3 = 12  (shift2 & shift4 are now INACTIVE)
+    expect(agg.teleopFuelActive).toBe(12);
+  });
+
+  it('teleopFuelInactive = shift2(inactive) + shift4(inactive)', () => {
+    // shift2 4 + shift4 2 = 6  (shift1 & shift3 are now ACTIVE)
+    expect(agg.teleopFuelInactive).toBe(6);
+  });
+
+  it('fuelPoints = active fuel * FUEL_POINTS (shift attribution swapped vs inactiveFirst:true)', () => {
+    // active = auto 5 + transition 3 + shift1 6 + shift3 3 + endgame 7 = 24
+    expect(agg.fuelPoints).toBe(24);
+  });
+});

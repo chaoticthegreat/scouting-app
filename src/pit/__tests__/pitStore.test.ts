@@ -63,8 +63,9 @@ describe('submitPit', () => {
       team_number: 254,
       drivetrain: 'swerve',
       mechanisms: ['shooter', 'climber'],
-      capabilities: ['auto', 'climb_l3'],
-      intake_sources: ['neutral'],
+      // intake sources are folded into the capabilities jsonb; there is no
+      // top-level intake_sources column on pit_scouting_report.
+      capabilities: { items: ['auto', 'climb_l3'], intakeSources: ['neutral'] },
       photo_path: '2026casj/254/a.jpg',
       notes: 'fast',
       author_scout_id: 'scout-1',

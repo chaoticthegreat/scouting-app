@@ -61,13 +61,19 @@ export async function getPitDraft(
 }
 
 export async function submitPit(report: PitReport): Promise<void> {
+  // `pit_scouting_report` has no `intake_sources` column. `capabilities` is a
+  // jsonb column, so the collected capability list and intake sources are
+  // folded into one jsonb object: { items: string[], intakeSources: string[] }.
+  const capabilities = {
+    items: report.capabilities,
+    intakeSources: report.intakeSources,
+  };
   const { error } = await supabase.from('pit_scouting_report').upsert({
     event_key: report.eventKey,
     team_number: report.teamNumber,
     drivetrain: report.drivetrain,
     mechanisms: report.mechanisms,
-    capabilities: report.capabilities,
-    intake_sources: report.intakeSources,
+    capabilities,
     photo_path: report.photoPath,
     notes: report.notes,
     author_scout_id: report.scoutId,

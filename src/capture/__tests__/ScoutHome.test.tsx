@@ -15,7 +15,8 @@ vi.mock('@/lib/supabase', () => {
   return {
     supabase: {
       from: () => ({
-        select: () => Promise.resolve({ data: rows, error: null }),
+        // ScoutHome filters by scout_id: .select('*').eq('scout_id', id)
+        select: () => ({ eq: () => Promise.resolve({ data: rows, error: null }) }),
       }),
     },
   };

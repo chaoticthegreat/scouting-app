@@ -116,11 +116,16 @@ export function useCaptureSession(target: CaptureTarget) {
     };
   }, [draftKey]);
 
+  // Persist the full CaptureTarget alongside the mutable draft state so a
+  // resumed draft reconstructs its event/alliance/station/team from the draft
+  // itself — never from whatever the manual-pick form happens to hold. Without
+  // this, a resumed match saves with the wrong alliance/station and an empty
+  // event_key (which later fails the server's event-scoped RLS insert).
   const persistDraft = useCallback(
     (next: DraftPayload) => {
-      void saveDraft(draftKey, next);
+      void saveDraft(draftKey, { ...next, target });
     },
-    [draftKey],
+    [draftKey, target],
   );
 
   const setInactiveFirst = useCallback(

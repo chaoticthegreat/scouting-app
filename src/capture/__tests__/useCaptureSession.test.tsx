@@ -100,6 +100,17 @@ describe('useCaptureSession.save', () => {
   });
 });
 
+describe('useCaptureSession draft target', () => {
+  it('persists the full capture target so a resumed report keeps its context', async () => {
+    const { result } = renderHook(() => useCaptureSession(target));
+    act(() => result.current.setInactiveFirst(true));
+    await waitFor(async () => {
+      const d = await getDraft('qm1:scout-1:254');
+      expect((d?.state as { target?: CaptureTarget } | undefined)?.target).toEqual(target);
+    });
+  });
+});
+
 describe('useCaptureSession draft resume', () => {
   it('resumes an existing draft on mount', async () => {
     await saveDraft('qm1:scout-1:254', {

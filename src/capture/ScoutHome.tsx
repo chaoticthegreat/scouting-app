@@ -52,7 +52,7 @@ export default function ScoutHome() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await supabase.from('assignment').select('*');
+      const res = await supabase.from('assignment').select('*').eq('scout_id', scoutId);
       if (!cancelled && res.data) {
         setAssignments(res.data as AssignmentRow[]);
       }
@@ -103,6 +103,8 @@ export default function ScoutHome() {
     a.href = desc.blobUrl;
     a.download = desc.filename;
     a.click();
+    // Release the object URL once the download has been initiated.
+    URL.revokeObjectURL(desc.blobUrl);
   };
 
   return (
@@ -219,6 +221,14 @@ export default function ScoutHome() {
                 variant="outline"
                 className="h-12 min-h-[44px] w-full justify-start text-sm"
                 onClick={() => {
+                  // New drafts store their full CaptureTarget — resume from it so
+                  // the report keeps its original event/alliance/station/team.
+                  const stored = (d.state as { target?: CaptureTarget } | null)?.target;
+                  if (stored) {
+                    setActive(stored);
+                    return;
+                  }
+                  // Legacy draft (pre-target): reconstruct from the key + form.
                   const [dMatch, dScout, dTeam] = d.draftKey.split(':');
                   setActive({
                     eventKey,

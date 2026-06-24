@@ -15,11 +15,7 @@ import { exportUnsyncedToFile } from '@/export/exportReports';
 import { SyncIndicator } from '@/sync/SyncIndicator';
 import { getStoredActiveEvent } from '@/dash/activeEventStore';
 import { listRoster, type RosterScouter } from '@/roster/rosterClient';
-import {
-  selectScouter,
-  getRememberedScouterName,
-  forgetScouterName,
-} from '@/roster/selectScouter';
+import { selectScouter, forgetScouterName } from '@/roster/selectScouter';
 
 interface AssignmentRow {
   match_key: string;

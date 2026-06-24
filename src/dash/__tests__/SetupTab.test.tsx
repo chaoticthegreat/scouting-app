@@ -33,20 +33,21 @@ vi.mock('@/lib/supabase', () => ({
   },
 }));
 
-// The jsdom-compat test env has a non-functional localStorage, so mock the
-// store module with an in-memory value (same approach as useActiveEvent.test).
-let nexusStored: string | null = null;
-vi.mock('../nexusEventStore', () => ({
-  NEXUS_DEMO_EVENT_KEY: 'nexus_demo_event_key',
-  getStoredNexusEventKey: () => nexusStored,
-  setStoredNexusEventKey: (v: string | null) => {
-    const trimmed = v?.trim();
-    nexusStored = trimmed ? trimmed : null;
+// The jsdom-compat test env has a non-functional localStorage, so mock the base
+// team store with an in-memory value (same approach as useActiveEvent.test).
+// vi.hoisted lets the (hoisted) vi.mock factory share state without TDZ issues.
+const DEFAULT_BASE_TEAM = 3256;
+const store = vi.hoisted(() => ({ team: 3256 }));
+vi.mock('@/dash/baseTeamStore', () => ({
+  DEFAULT_BASE_TEAM: 3256,
+  getStoredBaseTeam: () => store.team,
+  setStoredBaseTeam: (n: number | null) => {
+    store.team = n != null && Number.isInteger(n) && n > 0 ? n : 3256;
   },
 }));
 
 import SetupTab from '../SetupTab';
-import { getStoredNexusEventKey } from '../nexusEventStore';
+import { getStoredBaseTeam } from '@/dash/baseTeamStore';
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -55,7 +56,7 @@ function wrapper({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   setActiveEventMock.mockClear();
-  nexusStored = null;
+  store.team = DEFAULT_BASE_TEAM;
 });
 
 describe('SetupTab', () => {
@@ -64,38 +65,40 @@ describe('SetupTab', () => {
     expect(screen.getByTestId('setup-active-event').textContent).toContain('2026demo');
   });
 
-  it('keeps the active event when the lead confirms', async () => {
-    render(<SetupTab />, { wrapper });
-    fireEvent.click(screen.getByTestId('setup-set-active'));
-    await waitFor(() => expect(setActiveEventMock).toHaveBeenCalledWith('2026demo', expect.anything()));
-  });
-
   it('sets the imported event active', async () => {
     render(<SetupTab />, { wrapper });
     fireEvent.click(screen.getByTestId('import-stub'));
     await waitFor(() => expect(setActiveEventMock).toHaveBeenCalledWith('2026new', expect.anything()));
   });
 
-  it('saves a demo Nexus event id to the store', () => {
+  it('defaults the base team to 3256', () => {
     render(<SetupTab />, { wrapper });
-    fireEvent.change(screen.getByTestId('setup-nexus-event-input'), {
-      target: { value: '2026nexusdemo' },
-    });
-    fireEvent.click(screen.getByTestId('setup-nexus-event-save'));
-    expect(getStoredNexusEventKey()).toBe('2026nexusdemo');
-    expect(screen.getByTestId('setup-nexus-event-current').textContent).toContain('2026nexusdemo');
+    expect(screen.getByTestId('setup-base-team-current').textContent).toContain('3256');
   });
 
-  it('clears the demo Nexus event id', () => {
+  it('saves a new base team', () => {
     render(<SetupTab />, { wrapper });
-    fireEvent.change(screen.getByTestId('setup-nexus-event-input'), {
-      target: { value: '2026nexusdemo' },
-    });
-    fireEvent.click(screen.getByTestId('setup-nexus-event-save'));
-    expect(getStoredNexusEventKey()).toBe('2026nexusdemo');
+    fireEvent.change(screen.getByTestId('setup-base-team-input'), { target: { value: '254' } });
+    fireEvent.click(screen.getByTestId('setup-base-team-save'));
+    expect(getStoredBaseTeam()).toBe(254);
+    expect(screen.getByTestId('setup-base-team-current').textContent).toContain('254');
+  });
 
-    fireEvent.click(screen.getByTestId('setup-nexus-event-clear'));
-    expect(getStoredNexusEventKey()).toBeNull();
-    expect(screen.getByTestId('setup-nexus-event-current').textContent).toContain('— none —');
+  it('rejects a non-positive base team without persisting', () => {
+    render(<SetupTab />, { wrapper });
+    fireEvent.change(screen.getByTestId('setup-base-team-input'), { target: { value: '0' } });
+    fireEvent.click(screen.getByTestId('setup-base-team-save'));
+    expect(getStoredBaseTeam()).toBe(DEFAULT_BASE_TEAM);
+  });
+
+  it('resets the base team to the default', () => {
+    render(<SetupTab />, { wrapper });
+    fireEvent.change(screen.getByTestId('setup-base-team-input'), { target: { value: '254' } });
+    fireEvent.click(screen.getByTestId('setup-base-team-save'));
+    expect(getStoredBaseTeam()).toBe(254);
+
+    fireEvent.click(screen.getByTestId('setup-base-team-reset'));
+    expect(getStoredBaseTeam()).toBe(DEFAULT_BASE_TEAM);
+    expect(screen.getByTestId('setup-base-team-current').textContent).toContain('3256');
   });
 });

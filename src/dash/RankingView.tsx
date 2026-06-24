@@ -51,8 +51,10 @@ type SortDir = 'asc' | 'desc';
 /** A fully-resolved row: the pure agg plus the external (EPA/TBA) values. */
 interface Row {
   agg: TeamAgg;
-  /** Statbotics EPA, or null when unknown/unavailable. */
+  /** Best-available EPA: Statbotics → local match-results → in-house scouting. */
   epa: number | null;
+  /** True when `epa` is our in-house scouting estimate (no external EPA source). */
+  epaInHouse: boolean;
   /** TBA rank, or null when unavailable. */
   tbaRank: number | null;
 }
@@ -129,16 +131,26 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
   const epaByTeam = epaQuery.data?.epaByTeam;
   const epaAvailable = epaQuery.data?.available === true;
   const epaSource = epaQuery.data?.source ?? 'none';
+  // When NO external EPA source is available (Statbotics down AND no played-match
+  // results to compute a local EPA from), fall back to OUR in-house scouting
+  // estimate (scoutingExpectedPoints) so the EPA column shows a real number
+  // instead of "—". This is literally our home-grown EPA from scouting data.
+  const epaFromScouting = !epaAvailable;
   const tbaRankByTeam = useMemo(() => buildTbaRankMap(tbaQuery.data), [tbaQuery.data]);
 
   const rows = useMemo<Row[]>(
     () =>
-      aggs.map((agg) => ({
-        agg,
-        epa: epaAvailable ? epaByTeam?.get(agg.teamNumber) ?? null : null,
-        tbaRank: tbaRankByTeam.get(agg.teamNumber) ?? null,
-      })),
-    [aggs, epaAvailable, epaByTeam, tbaRankByTeam],
+      aggs.map((agg) => {
+        const external = epaAvailable ? epaByTeam?.get(agg.teamNumber) ?? null : null;
+        const epaInHouse = external == null && epaFromScouting;
+        return {
+          agg,
+          epa: epaInHouse ? agg.scoutingExpectedPoints : external,
+          epaInHouse,
+          tbaRank: tbaRankByTeam.get(agg.teamNumber) ?? null,
+        };
+      }),
+    [aggs, epaAvailable, epaFromScouting, epaByTeam, tbaRankByTeam],
   );
 
   const [sortKey, setSortKey] = useState<SortKey>('scoutingExpectedPoints');
@@ -245,9 +257,10 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
           ) : !epaAvailable ? (
             <div
               data-testid="dash-ranking-epa-banner"
-              className="text-xs text-muted-foreground"
+              className="text-xs text-amber-300"
             >
-              Statbotics EPA unavailable — showing scouting data only.
+              Statbotics &amp; match-result EPA unavailable — EPA column shows our in-house
+              estimate from scouting data.
             </div>
           ) : null}
         </CardHeader>
@@ -324,8 +337,15 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
                       <td className="px-2 py-2 tabular-nums">{pct(r.agg.climbSuccessRate)}</td>
                       <td className="px-2 py-2 tabular-nums">{fmt(r.agg.avgDefenseRating)}</td>
                       <td className="px-2 py-2 tabular-nums">{pct(r.agg.reliability)}</td>
-                      <td data-testid={`epa-${t}`} className="px-2 py-2 tabular-nums">
+                      <td
+                        data-testid={`epa-${t}`}
+                        className="px-2 py-2 tabular-nums"
+                        title={r.epaInHouse ? 'In-house EPA estimated from scouting data' : undefined}
+                      >
                         {r.epa === null ? EM_DASH : fmt(r.epa, 0)}
+                        {r.epaInHouse && r.epa !== null ? (
+                          <span className="ml-1 text-[10px] text-amber-300">est</span>
+                        ) : null}
                       </td>
                       <td data-testid={`tba-${t}`} className="px-2 py-2 tabular-nums">
                         {r.tbaRank === null ? EM_DASH : String(r.tbaRank)}

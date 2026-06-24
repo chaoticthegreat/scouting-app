@@ -5,8 +5,7 @@ import { ensureEventScoutsFromRoster } from './ensureEventScoutsClient';
 import type { AssignMatch, AssignScout, Assignment, AllianceColor } from './types';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-
-const OWN_TEAM = 3256;
+import { getStoredBaseTeam } from '@/dash/baseTeamStore';
 
 interface Slot {
   matchKey: string;
@@ -26,6 +25,9 @@ function slotKey(s: { matchKey: string; allianceColor: AllianceColor; station: n
 }
 
 export function AssignmentBoard({ eventKey, matches, scouts }: AssignmentBoardProps): JSX.Element {
+  // The base/own team is never scouted (you don't scout yourself), so its slots
+  // are excluded. Configurable in Setup; defaults to 3256.
+  const ownTeam = getStoredBaseTeam();
   // scoutId per slotKey ('' === unassigned)
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [generated, setGenerated] = useState(false);
@@ -52,7 +54,7 @@ export function AssignmentBoard({ eventKey, matches, scouts }: AssignmentBoardPr
       ];
       for (const a of teams) {
         a.nums.forEach((team, i) => {
-          if (team === OWN_TEAM) return;
+          if (team === ownTeam) return;
           if (team == null || !Number.isFinite(team)) return; // empty alliance slot
           out.push({
             matchKey: m.matchKey,
@@ -64,11 +66,11 @@ export function AssignmentBoard({ eventKey, matches, scouts }: AssignmentBoardPr
       }
     }
     return out;
-  }, [matches]);
+  }, [matches, ownTeam]);
 
   function generateFrom(activePool: AssignScout[]): void {
     const result = autoAssign(matches, activePool, {
-      ownTeam: OWN_TEAM,
+      ownTeam,
       breakEveryN: 6,
       rotatePositions: true,
     });

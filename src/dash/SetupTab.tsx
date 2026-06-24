@@ -1,8 +1,9 @@
-// src/dash/SetupTab.tsx — lead event setup: import an event, set it ACTIVE (so it
-// persists and "stays"), and assign scouters. Folds the old /admin page in.
+// src/dash/SetupTab.tsx — lead event setup: import an event (which becomes the
+// ACTIVE event and persists across sessions), set the BASE team the dashboard is
+// built around, and assign scouters. Folds the old /admin page in.
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Star, Radio } from 'lucide-react';
+import { CheckCircle2, Users } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,7 +13,11 @@ import { AssignmentBoard } from '@/admin/AssignmentBoard';
 import type { AssignMatch, AssignScout } from '@/admin/types';
 import { useActiveEvent } from '@/dash/useActiveEvent';
 import { setActiveEvent } from '@/dash/setActiveEvent';
-import { getStoredNexusEventKey, setStoredNexusEventKey } from '@/dash/nexusEventStore';
+import {
+  getStoredBaseTeam,
+  setStoredBaseTeam,
+  DEFAULT_BASE_TEAM,
+} from '@/dash/baseTeamStore';
 
 interface MatchRow {
   match_key: string;
@@ -35,21 +40,34 @@ export default function SetupTab(): JSX.Element {
   const { eventKey: activeEvent } = useActiveEvent();
   const [matches, setMatches] = useState<AssignMatch[]>([]);
   const [scouts, setScouts] = useState<AssignScout[]>([]);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [nexusInput, setNexusInput] = useState(() => getStoredNexusEventKey() ?? '');
-  const [nexusStored, setNexusStored] = useState<string | null>(() => getStoredNexusEventKey());
 
-  const saveNexusEvent = useCallback(() => {
-    setStoredNexusEventKey(nexusInput);
-    setNexusStored(getStoredNexusEventKey());
-  }, [nexusInput]);
+  // Base team: the team the whole dashboard pivots on (next match, live data,
+  // rankings). Defaults to 3256; configurable here so a lead can point the app at
+  // any team's event for testing. Stored locally; takes effect on next render.
+  const [baseTeamInput, setBaseTeamInput] = useState(() => String(getStoredBaseTeam()));
+  const [baseTeam, setBaseTeam] = useState(() => getStoredBaseTeam());
 
-  const clearNexusEvent = useCallback(() => {
-    setStoredNexusEventKey(null);
-    setNexusInput('');
-    setNexusStored(null);
-  }, []);
+  const saveBaseTeam = useCallback(() => {
+    const n = Number(baseTeamInput.trim());
+    if (!Number.isInteger(n) || n <= 0) {
+      setError('Base team must be a positive team number.');
+      return;
+    }
+    setError(null);
+    setStoredBaseTeam(n);
+    setBaseTeam(getStoredBaseTeam());
+    // Refresh views that key off the base team (Next Match prediction/EPA, etc.).
+    void queryClient.invalidateQueries();
+  }, [baseTeamInput, queryClient]);
+
+  const resetBaseTeam = useCallback(() => {
+    setStoredBaseTeam(null);
+    setBaseTeamInput(String(DEFAULT_BASE_TEAM));
+    setBaseTeam(DEFAULT_BASE_TEAM);
+    setError(null);
+    void queryClient.invalidateQueries();
+  }, [queryClient]);
 
   const loadEventData = useCallback(async (key: string) => {
     const [matchRes, scoutRes] = await Promise.all([
@@ -78,14 +96,11 @@ export default function SetupTab(): JSX.Element {
 
   const makeActive = useCallback(
     async (key: string) => {
-      setBusy(true);
       setError(null);
       try {
         await setActiveEvent(key, queryClient);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to set active event.');
-      } finally {
-        setBusy(false);
       }
     },
     [queryClient],
@@ -93,46 +108,56 @@ export default function SetupTab(): JSX.Element {
 
   return (
     <div data-testid="setup-tab" className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3">
-        <span className="text-sm text-muted-foreground">Active event</span>
-        <span data-testid="setup-active-event" className="font-mono text-lg font-semibold">
-          {activeEvent ?? '— none —'}
-        </span>
-        {activeEvent && <CheckCircle2 className="size-5 text-green-500" />}
+      {/* Active event. Set automatically when you import an event below; it sticks
+          across sessions, so there's nothing extra to press to "keep" it. */}
+      <div className="flex flex-col gap-1 rounded-lg border border-border p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-muted-foreground">Active event</span>
+          <span data-testid="setup-active-event" className="font-mono text-lg font-semibold">
+            {activeEvent ?? '— none —'}
+          </span>
+          {activeEvent && <CheckCircle2 className="size-5 text-green-500" />}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Importing an event makes it active and keeps it active across sessions and
+          devices. Import another event below to switch.
+        </p>
       </div>
 
-      {/* Optional DEMO Nexus event override — only affects the live field-status feed. */}
+      {/* Base team — pivots the whole dashboard (Next Match, live data, rankings). */}
       <div
-        data-testid="setup-nexus-event"
+        data-testid="setup-base-team"
         className="flex flex-col gap-2 rounded-lg border border-border p-3"
       >
         <div className="flex items-center gap-2">
-          <Radio className="size-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Demo Nexus event id (live data testing)</span>
+          <Users className="size-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Base team</span>
         </div>
         <p className="text-xs text-muted-foreground">
-          When set, the live Nexus field-status feed uses this event id instead of the active
-          event — useful for testing live data against a demo event such as a Nexus demo event.
+          The team the dashboard is built around — its next match, live field status,
+          and rankings. Defaults to {DEFAULT_BASE_TEAM}. Change it to test events your
+          team isn't registered at (e.g. to verify the live-data feed).
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            data-testid="setup-nexus-event-input"
-            className="max-w-xs font-mono"
-            placeholder="e.g. 2026demo"
-            value={nexusInput}
-            onChange={(e) => setNexusInput(e.target.value)}
+            data-testid="setup-base-team-input"
+            className="max-w-[8rem] font-mono"
+            inputMode="numeric"
+            placeholder="3256"
+            value={baseTeamInput}
+            onChange={(e) => setBaseTeamInput(e.target.value)}
           />
-          <Button data-testid="setup-nexus-event-save" variant="outline" onClick={saveNexusEvent}>
+          <Button data-testid="setup-base-team-save" variant="outline" onClick={saveBaseTeam}>
             Save
           </Button>
-          <Button data-testid="setup-nexus-event-clear" variant="ghost" onClick={clearNexusEvent}>
-            Clear
+          <Button data-testid="setup-base-team-reset" variant="ghost" onClick={resetBaseTeam}>
+            Reset to {DEFAULT_BASE_TEAM}
           </Button>
         </div>
         <div className="text-xs text-muted-foreground">
           Currently:{' '}
-          <span data-testid="setup-nexus-event-current" className="font-mono">
-            {nexusStored ?? '— none —'}
+          <span data-testid="setup-base-team-current" className="font-mono">
+            {baseTeam}
           </span>
         </div>
       </div>
@@ -148,15 +173,6 @@ export default function SetupTab(): JSX.Element {
 
       {activeEvent ? (
         <>
-          <Button
-            data-testid="setup-set-active"
-            size="big"
-            variant="outline"
-            disabled={busy}
-            onClick={() => void makeActive(activeEvent)}
-          >
-            <Star /> Keep “{activeEvent}” active
-          </Button>
           <ScheduleView eventKey={activeEvent} />
           <AssignmentBoard eventKey={activeEvent} matches={matches} scouts={scouts} />
         </>

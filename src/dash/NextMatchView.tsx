@@ -354,8 +354,8 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
   const eventInfo = eventInfoQ?.data ?? { name: null, webcast: null };
   const rankingsQ = useTbaRankings?.(eventKey);
   const rankRows = useMemo(() => parseTbaRankings(rankingsQ?.data), [rankingsQ?.data]);
-  const ourRankRow = rankRows.find((r) => r.teamNumber === OUR_TEAM) ?? null;
-  const seasonQ = useTeamSeasonStats?.(OUR_TEAM, eventKey, matchesQ.data ?? []);
+  const ourRankRow = rankRows.find((r) => r.teamNumber === baseTeam) ?? null;
+  const seasonQ = useTeamSeasonStats?.(baseTeam, eventKey, matchesQ.data ?? []);
   const season =
     seasonQ?.data ?? {
       worldRank: null,
@@ -371,8 +371,8 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
   const allMatches = useMemo(() => matchesQ.data ?? [], [matchesQ.data]);
   const sortedMatches = useMemo(() => sortMatchesForSelect(allMatches), [allMatches]);
   const autoMatch = useMemo(
-    () => (allMatches.length ? pickNextMatch(allMatches) : null),
-    [allMatches],
+    () => (allMatches.length ? pickNextMatch(allMatches, baseTeam) : null),
+    [allMatches, baseTeam],
   );
 
   // Resolve the viewed match: pinned (if it still exists) else the auto-pick.
@@ -434,7 +434,7 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
     statboticsAvailable: epa.available,
   });
 
-  const ourAllianceIsRed = redTeams.includes(OUR_TEAM);
+  const ourAllianceIsRed = redTeams.includes(baseTeam);
   const ourSide: 'red' | 'blue' = ourAllianceIsRed ? 'red' : 'blue';
   const redReports = reports.filter((r) => redTeams.includes(r.target_team_number));
   const blueReports = reports.filter((r) => blueTeams.includes(r.target_team_number));
@@ -449,7 +449,7 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
   // Upcoming rail: ONLY OUR (3256) upcoming matches — prefer Nexus' ordered list,
   // else the schedule. (The On-Field/Queuing tiles still reflect the whole field.)
   const nexusOursUpcoming = (status?.upcoming ?? []).filter(
-    (nm) => nm.redTeams.includes(OUR_TEAM) || nm.blueTeams.includes(OUR_TEAM),
+    (nm) => nm.redTeams.includes(baseTeam) || nm.blueTeams.includes(baseTeam),
   );
   const upcoming: Array<{ key: string; label: string; red: number[]; blue: number[]; time: string | null; isOurs: boolean }> =
     nexusOursUpcoming.length > 0
@@ -465,7 +465,7 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
           .filter(
             (m) =>
               isUnplayed(m) &&
-              (redTeamsOf(m).includes(OUR_TEAM) || blueTeamsOf(m).includes(OUR_TEAM)),
+              (redTeamsOf(m).includes(baseTeam) || blueTeamsOf(m).includes(baseTeam)),
           )
           .sort((a, b) => a.match_number - b.match_number)
           .slice(0, 6)
@@ -489,29 +489,18 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
           {eventInfo.name ?? eventKey}
         </h2>
         <span className="font-mono text-sm text-muted-foreground">
-          {eventKey} · {OUR_TEAM}
+          {eventKey} · {baseTeam}
         </span>
       </div>
 
-      {/* Broadcast grid: livestream + rankings · leaderboard · OUR next match. */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_1fr_1.1fr]">
-        {/* LEFT — livestream + event/season rankings. */}
-        <div className="flex flex-col gap-4">
-          <EventStream webcast={eventInfo.webcast} />
-          <EventRankSummary row={ourRankRow} teamCount={rankRows.length || null} />
-          <SeasonStats
-            team={OUR_TEAM}
-            worldRank={season.worldRank}
-            totalEpa={season.totalEpa}
-            epaSource={season.epaSource}
-            seasonRecord={season.seasonRecord}
-          />
-        </div>
+      {/* Livestream — full width + large so it's the centerpiece of the view. */}
+      <div className="mx-auto w-full max-w-5xl">
+        <EventStream webcast={eventInfo.webcast} />
+      </div>
 
-        {/* CENTER — official TBA leaderboard. */}
-        <Leaderboard rows={rankRows} ourTeam={OUR_TEAM} />
-
-        {/* RIGHT — OUR next-match hero, live field tiles, OUR upcoming rail. */}
+      {/* Main row: OUR next match (left) · event + season rankings (right). */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
+        {/* LEFT — OUR next-match hero, live field tiles, OUR upcoming rail. */}
         <div className="flex flex-col gap-4">
       {/* Hero: OUR next match. The match label is the loudest thing on the page. */}
       <Card
@@ -523,7 +512,7 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
         <CardContent className="flex flex-col gap-3 p-5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              Next match · {OUR_TEAM}
+              Next match · {baseTeam}
             </span>
             {nexusLive ? <LiveBadge /> : null}
           </div>
@@ -623,6 +612,18 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
         </CardContent>
       </Card>
         </div>
+
+        {/* RIGHT — event + season rankings (bigger now the leaderboard is gone). */}
+        <div className="flex flex-col gap-4">
+          <EventRankSummary row={ourRankRow} teamCount={rankRows.length || null} />
+          <SeasonStats
+            team={baseTeam}
+            worldRank={season.worldRank}
+            totalEpa={season.totalEpa}
+            epaSource={season.epaSource}
+            seasonRecord={season.seasonRecord}
+          />
+        </div>
       </div>
 
       {/* Prediction breakdown — keep the selector + per-team detail + auto routines. */}
@@ -676,6 +677,7 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
           allTeams={allTeams}
           reports={redReports}
           isOurAlliance={ourAllianceIsRed}
+          baseTeam={baseTeam}
         />
         <AllianceColumn
           side="blue"
@@ -686,6 +688,7 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
           allTeams={allTeams}
           reports={blueReports}
           isOurAlliance={!ourAllianceIsRed}
+          baseTeam={baseTeam}
         />
       </div>
     </div>

@@ -123,12 +123,17 @@ describe('RankingView', () => {
     expect(rows[1].getAttribute('data-testid')).toBe('ranking-row-1678');
   });
 
-  it('shows "—" for EPA when Statbotics is unavailable', () => {
+  it('falls back to an in-house scouting EPA when no external EPA is available', () => {
     reportsReturn = { data: reports, isLoading: false };
-    epaReturn = { data: { epaByTeam: new Map(), available: false } };
+    epaReturn = { data: { epaByTeam: new Map(), available: false, source: 'none' } };
     const { getByTestId } = render(<RankingView eventKey="2026casnv" />);
     const row254 = getByTestId('ranking-row-254');
-    expect(within(row254).getByTestId('epa-254').textContent).toBe('—');
+    // No "—": the EPA cell shows our in-house scouting estimate (a number) + "est".
+    const cell = within(row254).getByTestId('epa-254');
+    expect(cell.textContent).not.toBe('—');
+    expect(cell.textContent).toMatch(/^\d+est$/);
+    // Banner explains the fallback source.
+    expect(getByTestId('dash-ranking-epa-banner').textContent).toMatch(/in-house/i);
   });
 
   it('shows the EPA value when Statbotics is available', () => {

@@ -86,12 +86,17 @@ let sessionScout: { id: string; display_name?: string; event_key?: string } | nu
 
 vi.mock('@/auth/useSession', () => ({
   useSession: () => ({ scout: sessionScout, session: {}, role: 'scout', loading: false }),
+  clearCachedScout: () => {},
 }));
 
 const forgetScouterName = vi.fn();
+const markScouterLoggedOut = vi.fn();
+let loggedOutFlag = false;
 vi.mock('@/roster/selectScouter', () => ({
   forgetScouterName: () => forgetScouterName(),
   getRememberedScouterName: () => null,
+  isScouterLoggedOut: () => loggedOutFlag,
+  markScouterLoggedOut: () => markScouterLoggedOut(),
   selectScouter: vi.fn(),
 }));
 
@@ -131,6 +136,8 @@ beforeEach(async () => {
   await db.reports.clear();
   await db.drafts.clear();
   forgetScouterName.mockClear();
+  markScouterLoggedOut.mockClear();
+  loggedOutFlag = false;
   sessionScout = { id: 'scout-1', display_name: 'Casey', event_key: '2026demo' };
 });
 

@@ -296,31 +296,23 @@ export function ReviewScreen(props: {
           </section>
         )}
 
-        {/* Step 4: Auto — start position is captured pre-match on the placement
-            step, so it is shown read-only here for reference. Only the auto path
-            is editable. */}
+        {/* Step 4: Auto — draw the auto path. The start position (captured
+            pre-match on the placement step) is already rendered as the orange
+            marker on this same diagram, so no separate read-only field image is
+            needed. */}
         {step === 3 && (
-          <section className="flex flex-col gap-3 landscape:grid landscape:grid-cols-2 landscape:gap-4">
+          <section className="flex flex-col gap-3">
             <div className="rounded-2xl border border-border bg-card p-3 landscape:p-4">
               <p className="mb-2 flex items-center gap-2 text-base font-semibold">
                 <Route className="size-5 text-brand" />
-                Start position
-                <span className="text-sm font-normal text-muted-foreground">(from placement)</span>
+                Auto path
+                <span className="text-sm font-normal text-muted-foreground">
+                  (start position shown)
+                </span>
               </p>
-              {/* Field image is ~2.46:1 wide. In portrait, cap the wrapper width
-                  so two stacked diagrams + nav + header fit one viewport; in
-                  landscape let it fill its grid column. */}
-              <div className="mx-auto w-full max-w-[320px] landscape:max-w-none">
-                <FieldDiagram
-                  mode="view"
-                  startPosition={s.autoStartPosition}
-                  data-testid="review-field-start-view"
-                />
-              </div>
-            </div>
-            <div className="rounded-2xl border border-border bg-card p-3 landscape:p-4">
-              <p className="mb-2 text-base font-semibold">Auto path</p>
-              <div className="mx-auto w-full max-w-[320px] landscape:max-w-none">
+              {/* Now the only diagram on this step, so it gets the full width
+                  (capped for comfortable tracing). */}
+              <div className="mx-auto w-full max-w-[480px] landscape:max-w-[680px]">
                 <FieldDiagram
                   mode="draw-path"
                   startPosition={s.autoStartPosition}

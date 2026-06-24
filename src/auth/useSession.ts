@@ -34,6 +34,14 @@ function writeCachedScout(row: ScoutRow | null): void {
 }
 
 /**
+ * Drop the persisted scout row. Called on log-out so a fresh mount doesn't seed
+ * the old profile back from cache before the (durable) logout flag is honored.
+ */
+export function clearCachedScout(): void {
+  writeCachedScout(null);
+}
+
+/**
  * Resolve this device's scout row.
  *
  * Returns:

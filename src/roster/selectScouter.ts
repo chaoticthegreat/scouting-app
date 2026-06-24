@@ -6,6 +6,12 @@ import { supabase } from '@/lib/supabase';
 import type { ScoutRow } from '@/auth/scoutRow';
 
 const REMEMBER_KEY = 'my_scouter_name';
+// Durable "this device logged out" flag. The device's anonymous auth.uid stays
+// bound to its old scout row server-side, so useSession would otherwise re-resolve
+// the previous profile on every fresh mount/reload — leaving a logged-out scout
+// "stuck in a certain profile". This flag persists the intent until a new name is
+// picked, which is what makes log-out actually stick across reloads.
+const LOGGED_OUT_KEY = 'scouter_logged_out';
 
 /** The name this device last selected, or null. */
 export function getRememberedScouterName(): string | null {
@@ -33,6 +39,32 @@ export function forgetScouterName(): void {
   }
 }
 
+/** True if this device logged out and hasn't picked a new scouter since. */
+export function isScouterLoggedOut(): boolean {
+  try {
+    return localStorage.getItem(LOGGED_OUT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Durably mark this device as logged out (survives reload until the next pick). */
+export function markScouterLoggedOut(): void {
+  try {
+    localStorage.setItem(LOGGED_OUT_KEY, '1');
+  } catch {
+    /* non-fatal */
+  }
+}
+
+function clearLoggedOutFlag(): void {
+  try {
+    localStorage.removeItem(LOGGED_OUT_KEY);
+  } catch {
+    /* non-fatal */
+  }
+}
+
 /**
  * Bind this device to `name` for `eventKey` and return the resolved scout row.
  * Persists the chosen name locally on success.
@@ -52,5 +84,7 @@ export async function selectScouter(eventKey: string, name: string): Promise<Sco
     throw new Error('select_scouter returned no row');
   }
   rememberScouterName(name);
+  // A successful pick supersedes any prior log-out on this device.
+  clearLoggedOutFlag();
   return row;
 }

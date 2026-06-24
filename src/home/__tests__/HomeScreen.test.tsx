@@ -1,16 +1,28 @@
 // HomeScreen landing page — lets the user choose Scout vs Lead Dashboard.
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect } from 'vitest';
 import HomeScreen from '../HomeScreen';
 
+// HomeScreen uses react-router <Link> for client-side (offline-safe) navigation,
+// so it must render inside a router. <Link> still renders an <a href>, so the
+// destination assertions below are unchanged.
+function renderHome() {
+  return render(
+    <MemoryRouter>
+      <HomeScreen />
+    </MemoryRouter>,
+  );
+}
+
 describe('HomeScreen', () => {
   it('renders the landing shell', () => {
-    render(<HomeScreen />);
+    renderHome();
     expect(screen.getByTestId('home-screen')).toBeInTheDocument();
   });
 
   it('offers a Scout choice linking to /scout', () => {
-    render(<HomeScreen />);
+    renderHome();
     const scout = screen.getByTestId('home-go-scout');
     expect(scout).toBeInTheDocument();
     expect(scout).toHaveAttribute('href', '/scout');
@@ -18,7 +30,7 @@ describe('HomeScreen', () => {
   });
 
   it('offers a Lead Dashboard choice linking to /dashboard', () => {
-    render(<HomeScreen />);
+    renderHome();
     const dash = screen.getByTestId('home-go-dashboard');
     expect(dash).toBeInTheDocument();
     expect(dash).toHaveAttribute('href', '/dashboard');

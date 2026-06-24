@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { ArrowLeft, Home } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -19,9 +20,12 @@ export interface BackLinkProps {
 
 /**
  * Standard in-app navigation link for installed-PWA users, who have no browser
- * back button. Renders the same plain `<a href>` the rest of the app uses (see
- * HomeScreen / ScoutHome) at a 44px minimum touch target. Drop one into every
- * top-level screen's header so no page is a dead end.
+ * back button. Uses react-router client-side navigation (NOT a full-page
+ * `<a href>` reload) so back/forward works offline — a full document reload
+ * depends on the service worker re-serving index.html and was the cause of
+ * "pages stop loading when going back". Renders an anchor at a 44px minimum
+ * touch target. Drop one into every top-level screen's header so no page is a
+ * dead end.
  */
 export function BackLink({
   to = '/',
@@ -33,8 +37,8 @@ export function BackLink({
 }: BackLinkProps): JSX.Element {
   const Icon = icon === 'home' ? Home : ArrowLeft;
   return (
-    <a
-      href={to}
+    <Link
+      to={to}
       aria-label={iconOnly ? label : undefined}
       data-testid={rest['data-testid'] ?? 'nav-back'}
       className={cn(
@@ -45,7 +49,7 @@ export function BackLink({
     >
       <Icon className="size-5" />
       {iconOnly ? null : label}
-    </a>
+    </Link>
   );
 }
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('@/dash/useActiveEvent', () => ({
   useActiveEvent: () => ({ eventKey: '2026demo', loading: false }),
@@ -36,12 +37,20 @@ beforeEach(() => {
 
 describe('DashboardScreen', () => {
   it('defaults to the Next Match tab', () => {
-    render(<DashboardScreen />);
+    render(
+      <MemoryRouter>
+        <DashboardScreen />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('view-next')).toBeInTheDocument();
   });
 
   it('switches to the Scouters and Setup tabs on click', () => {
-    render(<DashboardScreen />);
+    render(
+      <MemoryRouter>
+        <DashboardScreen />
+      </MemoryRouter>,
+    );
     fireEvent.click(screen.getByRole('tab', { name: 'Scouters' }));
     expect(screen.getByTestId('scouters-tab')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Setup' }));
@@ -49,31 +58,51 @@ describe('DashboardScreen', () => {
   });
 
   it('switches to the Match drill-down tab on click', () => {
-    render(<DashboardScreen />);
+    render(
+      <MemoryRouter>
+        <DashboardScreen />
+      </MemoryRouter>,
+    );
     fireEvent.click(screen.getByRole('tab', { name: 'Match' }));
     expect(screen.getByTestId('view-match')).toBeInTheDocument();
   });
 
   it('opens directly on Setup when ?tab=setup (the /admin alias)', () => {
     window.history.replaceState({}, '', '/dashboard?tab=setup');
-    render(<DashboardScreen />);
+    render(
+      <MemoryRouter>
+        <DashboardScreen />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('setup-tab')).toBeInTheDocument();
   });
 
   it('resolves the retired ?tab=scouter alias to the merged Scouters tab', () => {
     window.history.replaceState({}, '', '/dashboard?tab=scouter');
-    render(<DashboardScreen />);
+    render(
+      <MemoryRouter>
+        <DashboardScreen />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('scouters-tab')).toBeInTheDocument();
   });
 
   it('resolves the retired ?tab=roster alias to the merged Scouters tab', () => {
     window.history.replaceState({}, '', '/dashboard?tab=roster');
-    render(<DashboardScreen />);
+    render(
+      <MemoryRouter>
+        <DashboardScreen />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('scouters-tab')).toBeInTheDocument();
   });
 
   it('opens the Team tab with the team preselected when a ranking row is picked', () => {
-    render(<DashboardScreen />);
+    render(
+      <MemoryRouter>
+        <DashboardScreen />
+      </MemoryRouter>,
+    );
     fireEvent.click(screen.getByRole('tab', { name: 'Ranking' }));
     fireEvent.click(screen.getByTestId('rank-pick-254'));
     const team = screen.getByTestId('view-team');

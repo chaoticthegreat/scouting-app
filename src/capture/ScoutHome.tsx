@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { BarChart3, UserRound, LogOut, Search, Target, Wrench, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
@@ -7,7 +7,7 @@ import PitScoutFlow from '@/pit/PitScoutFlow';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/supabase';
-import { useSession } from '@/auth/useSession';
+import { useSession, clearCachedScout } from '@/auth/useSession';
 import type { ScoutRow } from '@/auth/scoutRow';
 import { listDrafts } from '@/db/localStore';
 import type { CaptureDraft } from '@/db/types';
@@ -19,7 +19,12 @@ import { SyncIndicator } from '@/sync/SyncIndicator';
 import { InstallPrompt } from '@/pwa/InstallPrompt';
 import { getStoredActiveEvent } from '@/dash/activeEventStore';
 import { listRoster, type RosterScouter } from '@/roster/rosterClient';
-import { selectScouter, forgetScouterName } from '@/roster/selectScouter';
+import {
+  selectScouter,
+  forgetScouterName,
+  isScouterLoggedOut,
+  markScouterLoggedOut,
+} from '@/roster/selectScouter';
 import { UpcomingMatches, matchLabelFromKey } from '@/capture/UpcomingMatches';
 import { getCachedAssignments, getCachedRoster } from '@/db/preloadClient';
 import { OfflineReadyBadge } from '@/offline/OfflineReadyBadge';
@@ -179,10 +184,12 @@ export default function ScoutHome() {
     );
   };
   const [picked, setPicked] = useState<ScoutRow | null>(null);
-  // Local logout override: when true, force the NamePicker to show regardless of
-  // what useSession resolves (the device's anonymous auth.uid stays bound to a
-  // scout row until a new name is picked, so `scout` is still truthy on reload).
-  const [loggedOut, setLoggedOut] = useState(false);
+  // Logout override: when true, force the NamePicker to show regardless of what
+  // useSession resolves (the device's anonymous auth.uid stays bound to a scout
+  // row until a new name is picked, so `scout` is still truthy on reload). Seeded
+  // from a DURABLE flag so logging out survives reloads/remounts — otherwise the
+  // old profile resurrected from cache and the user got "stuck in a profile".
+  const [loggedOut, setLoggedOut] = useState<boolean>(() => isScouterLoggedOut());
   const [confirmLogout, setConfirmLogout] = useState(false);
   // A fresh pick on THIS device wins over the session-resolved row: re-picking
   // after logout updates the same auth_uid's scout row, but useSession may still
@@ -274,13 +281,13 @@ export default function ScoutHome() {
         <header className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">Scout</h1>
           <div className="flex items-center gap-2">
-            <a
+            <Link
               data-testid="nav-home"
-              href="/"
+              to="/"
               className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-border px-4 text-sm font-medium hover:bg-accent"
             >
               <Home className="size-5" /> Home
-            </a>
+            </Link>
             <SyncIndicator />
           </div>
         </header>
@@ -355,12 +362,15 @@ export default function ScoutHome() {
 
   const logOut = () => {
     forgetScouterName();
-    // Show the name picker in place so a new scouter can take over this device.
-    // We do NOT navigate away or reload: the device's anonymous auth.uid stays
-    // bound to the old scout row (useSession would re-resolve it on a fresh
-    // mount), so the only reliable way to surface the picker is the `loggedOut`
-    // override below. Clearing `picked` drops the previous in-session choice; the
-    // gate (`!effective`) then renders NamePicker, and onPicked re-points the row.
+    // Persist the logout so it survives a reload/remount: the device's anonymous
+    // auth.uid stays bound to the old scout row (useSession would re-resolve it
+    // on a fresh mount) AND `loggedOut` is plain React state that resets on every
+    // remount — together those resurrected the old profile, leaving the user
+    // "stuck in a certain profile". The durable flag (read back into `loggedOut`'s
+    // initial state) keeps the picker up until a new name is picked, and clearing
+    // the cached scout row stops it being seeded back before the flag is honored.
+    markScouterLoggedOut();
+    clearCachedScout();
     setPicked(null);
     setConfirmLogout(false);
     setLoggedOut(true);
@@ -379,20 +389,20 @@ export default function ScoutHome() {
         <div className="flex flex-wrap items-center justify-end gap-2">
           <OfflineReadyBadge eventKey={activeEvent ?? eventKey ?? null} scoutId={scoutId || undefined} />
           <SyncIndicator />
-          <a
+          <Link
             data-testid="nav-home"
-            href="/"
+            to="/"
             className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-border px-4 text-sm font-medium hover:bg-accent"
           >
             <Home className="size-5" /> Home
-          </a>
-          <a
+          </Link>
+          <Link
             data-testid="nav-my-data"
-            href="/my-data"
+            to="/my-data"
             className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-border px-4 text-sm font-medium hover:bg-accent"
           >
             <BarChart3 className="size-5" /> My Data
-          </a>
+          </Link>
           {confirmLogout ? (
             <div className="flex items-center gap-2">
               <Button
@@ -429,20 +439,20 @@ export default function ScoutHome() {
       <InstallPrompt />
 
       <nav className="flex flex-wrap gap-3">
-        <a
+        <Link
           data-testid="nav-qr-send"
-          href="/qr/send"
+          to="/qr/send"
           className="inline-flex min-h-[44px] flex-1 items-center justify-center rounded-md border border-border px-4 text-sm font-medium hover:bg-accent"
         >
           Send via QR
-        </a>
-        <a
+        </Link>
+        <Link
           data-testid="nav-qr-receive"
-          href="/qr/receive"
+          to="/qr/receive"
           className="inline-flex min-h-[44px] flex-1 items-center justify-center rounded-md border border-border px-4 text-sm font-medium hover:bg-accent"
         >
           Receive via QR
-        </a>
+        </Link>
       </nav>
 
       <SegmentedToggle<ScoutMode>

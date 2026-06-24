@@ -1,7 +1,10 @@
 // src/home/HomeScreen.tsx — landing page. No auth, no gates: a deliberate fork
 // between the two roles. Scouts tap "Scout"; leads/drive-coaches tap "Lead
-// Dashboard". Plain <a href> navigation matches the rest of the app. Built for
-// phones in landscape — the two choices sit side by side there, stacked otherwise.
+// Dashboard". Uses react-router client-side navigation so it works offline (a
+// full-page reload would depend on the service worker re-serving the document).
+// Built for phones in landscape — the two choices sit side by side there,
+// stacked otherwise.
+import { Link } from 'react-router-dom';
 import { ClipboardList, LayoutDashboard, ArrowRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -50,10 +53,10 @@ export default function HomeScreen(): JSX.Element {
         {CHOICES.map((c) => {
           const Icon = c.icon;
           return (
-            <a
+            <Link
               key={c.testid}
               data-testid={c.testid}
-              href={c.href}
+              to={c.href}
               className="group flex min-h-[44px] flex-col gap-4 rounded-xl border border-border bg-card p-6 text-card-foreground shadow transition-colors hover:border-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <span className="flex size-12 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
@@ -64,7 +67,7 @@ export default function HomeScreen(): JSX.Element {
                 <ArrowRight className="size-5 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-foreground" />
               </span>
               <span className="text-sm text-muted-foreground">{c.blurb}</span>
-            </a>
+            </Link>
           );
         })}
       </div>

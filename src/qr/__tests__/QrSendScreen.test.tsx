@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 // Hoisted mock fns — vi.mock factories run before module-level consts, so the
 // shared spies must come from vi.hoisted().
@@ -62,7 +63,11 @@ afterEach(() => {
 describe('QrSendScreen', () => {
   it('renders the qr-send screen and a frame image from the backlog', async () => {
     getSyncQueue.mockResolvedValue(backlog);
-    render(<QrSendScreen />);
+    render(
+      <MemoryRouter>
+        <QrSendScreen />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('qr-send')).toBeTruthy();
     const img = await screen.findByTestId('qr-frame');
     expect(img.getAttribute('src')).toBe('data:image/png;base64,STUB');
@@ -72,7 +77,11 @@ describe('QrSendScreen', () => {
   it('emits fountain symbols that decode to SNAKE_CASE wire payloads, not camelCase', async () => {
     vi.useFakeTimers();
     getSyncQueue.mockResolvedValue(backlog);
-    render(<QrSendScreen />);
+    render(
+      <MemoryRouter>
+        <QrSendScreen />
+      </MemoryRouter>,
+    );
 
     // Flush the async backlog load + compression + first frame render.
     await act(async () => {
@@ -112,7 +121,11 @@ describe('QrSendScreen', () => {
 
   it('shows an empty state when the queue is empty', async () => {
     getSyncQueue.mockResolvedValue([]);
-    render(<QrSendScreen />);
+    render(
+      <MemoryRouter>
+        <QrSendScreen />
+      </MemoryRouter>,
+    );
     await waitFor(() => {
       expect(screen.getByText(/nothing to send/i)).toBeTruthy();
     });
@@ -122,7 +135,11 @@ describe('QrSendScreen', () => {
   it('advances the sent-symbol counter over time', async () => {
     vi.useFakeTimers();
     getSyncQueue.mockResolvedValue(backlog);
-    render(<QrSendScreen />);
+    render(
+      <MemoryRouter>
+        <QrSendScreen />
+      </MemoryRouter>,
+    );
 
     await act(async () => {
       await Promise.resolve();

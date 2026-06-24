@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 // --- mock useSession (lead is staff) ---
 const useSessionMock = vi.fn();
@@ -46,13 +47,21 @@ beforeEach(() => {
 
 describe('SyncStatusScreen', () => {
   it('renders the screen container', async () => {
-    render(<SyncStatusScreen />);
+    render(
+      <MemoryRouter>
+        <SyncStatusScreen />
+      </MemoryRouter>,
+    );
     expect(await screen.findByTestId('sync-status')).toBeInTheDocument();
   });
 
   it('shows a no-active-event empty state', async () => {
     useSessionMock.mockReturnValue({ scout: null, session: {}, role: 'lead', loading: false });
-    render(<SyncStatusScreen />);
+    render(
+      <MemoryRouter>
+        <SyncStatusScreen />
+      </MemoryRouter>,
+    );
     await waitFor(() => {
       expect(screen.getByTestId('sync-status')).toHaveTextContent(/no active event/i);
     });
@@ -80,7 +89,11 @@ describe('SyncStatusScreen', () => {
         },
       ]
     );
-    render(<SyncStatusScreen />);
+    render(
+      <MemoryRouter>
+        <SyncStatusScreen />
+      </MemoryRouter>,
+    );
     const row = await screen.findByTestId('sync-match-qm1');
     // 2 of the 3 assigned reports have arrived
     expect(row).toHaveTextContent('2/3');
@@ -101,7 +114,11 @@ describe('SyncStatusScreen', () => {
         },
       ]
     );
-    render(<SyncStatusScreen />);
+    render(
+      <MemoryRouter>
+        <SyncStatusScreen />
+      </MemoryRouter>,
+    );
     const row = await screen.findByTestId('sync-match-qm2');
     expect(row).toHaveTextContent('1/2');
     // the missing assigned target is surfaced

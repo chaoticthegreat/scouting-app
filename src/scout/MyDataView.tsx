@@ -3,6 +3,7 @@
 // newest first, with the key per-match detail. Reads local reports from the offline
 // store; an empty state covers a fresh device or a device with no captures yet.
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useSession } from '@/auth/useSession';
 import { listReports } from '@/db/localStore';
@@ -42,14 +43,14 @@ export default function MyDataView(): JSX.Element {
       className="flex min-h-screen flex-col gap-4 bg-background p-4 text-foreground"
     >
       <header className="flex items-center gap-3">
-        <a
-          href="/scout"
+        <Link
+          to="/scout"
           data-testid="my-data-back"
           aria-label="Back to scout"
           className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border hover:bg-accent"
         >
           <ArrowLeft className="size-5" />
-        </a>
+        </Link>
         <h1 className="text-2xl font-bold">My Data</h1>
         <span className="ml-auto text-sm text-muted-foreground">
           {reports.length} {reports.length === 1 ? 'match' : 'matches'}

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import type { LocalMatchReport } from '@/db/types';
 
 vi.mock('@/auth/useSession', () => ({
@@ -40,7 +41,11 @@ describe('MyDataView', () => {
       mkReport({ id: 'c', scoutId: 'scout-1', matchKey: 'qm3', createdAt: '2026-06-23T00:00:03.000Z' }),
     ]);
 
-    render(<MyDataView />);
+    render(
+      <MemoryRouter>
+        <MyDataView />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(screen.getAllByTestId('my-data-row').length).toBe(2));
 
     const rows = screen.getAllByTestId('my-data-row');
@@ -53,7 +58,11 @@ describe('MyDataView', () => {
 
   it('renders the empty state when the scout has no matches', async () => {
     listReportsMock.mockResolvedValue([mkReport({ scoutId: 'scout-2' })]);
-    render(<MyDataView />);
+    render(
+      <MemoryRouter>
+        <MyDataView />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(screen.getByTestId('my-data-empty')).toBeTruthy());
   });
 
@@ -61,7 +70,11 @@ describe('MyDataView', () => {
     listReportsMock.mockResolvedValue([
       mkReport({ id: 'a', scoutId: 'scout-1', defenseDurationMs: 4200, defendedDurationMs: 1500 }),
     ]);
-    render(<MyDataView />);
+    render(
+      <MemoryRouter>
+        <MyDataView />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(screen.getByTestId('my-data-row')).toBeTruthy());
     const row = screen.getByTestId('my-data-row');
     expect(row.textContent).toContain('4.2s');

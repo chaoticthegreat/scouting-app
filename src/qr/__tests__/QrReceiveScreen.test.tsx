@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 // --- @zxing/browser fake reader --------------------------------------------
 // decodeFromVideoDevice stores the continuous-decode callback so the test can
@@ -112,7 +113,11 @@ afterEach(() => {
 
 describe('QrReceiveScreen', () => {
   it('advances progress as frames arrive, then ingests on completion', async () => {
-    render(<QrReceiveScreen />);
+    render(
+      <MemoryRouter>
+        <QrReceiveScreen />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('qr-receive')).toBeTruthy();
 
     // Wait for the reader to register its callback.
@@ -171,7 +176,11 @@ describe('QrReceiveScreen', () => {
 
   it('surfaces a camera-permission denial as a visible error', async () => {
     reject();
-    render(<QrReceiveScreen />);
+    render(
+      <MemoryRouter>
+        <QrReceiveScreen />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(screen.getByTestId('qr-receive-error')).toBeTruthy());
     expect(postIngest).not.toHaveBeenCalled();
   });
@@ -184,7 +193,11 @@ describe('QrReceiveScreen', () => {
       value: undefined,
     });
 
-    render(<QrReceiveScreen />);
+    render(
+      <MemoryRouter>
+        <QrReceiveScreen />
+      </MemoryRouter>,
+    );
 
     const error = await screen.findByTestId('qr-receive-error');
     expect(error).toBeTruthy();

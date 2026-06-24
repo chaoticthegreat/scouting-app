@@ -5,44 +5,35 @@
 import { test, expect } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { setActiveEvent } from './helpers';
 
 loadEnv({ path: '.env.local' });
 
 const URL = process.env.VITE_SUPABASE_URL as string;
 const SECRET = process.env.SUPABASE_SECRET_KEY as string;
-const ADMIN_EMAIL = process.env.TEST_ADMIN_EMAIL;
-const ADMIN_PASSWORD = process.env.TEST_ADMIN_PASSWORD;
 
 const admin: SupabaseClient = createClient(URL, SECRET, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-let eventKey = '2026casnv';
+const eventKey = '2026casnv';
 
 test.beforeAll(async () => {
-  const { data } = await admin
-    .from('event')
-    .select('event_key')
-    .eq('is_active', true)
-    .maybeSingle();
-  eventKey = (data?.event_key as string) ?? '2026casnv';
+  test.skip(!URL || !SECRET, 'Set VITE_SUPABASE_URL + SUPABASE_SECRET_KEY in .env.local.');
+  // The open (no-login) dashboard depends on migration 0009 (open RLS + scouter_roster).
+  const probe = await admin.from('scouter_roster').select('id').limit(1);
+  test.skip(!!probe.error, 'Apply migration 0009 (open RLS) to run the login-less dashboard flows.');
+  await setActiveEvent(admin, eventKey);
   await admin.from('picklist').delete().eq('event_key', eventKey);
 });
 test.afterAll(async () => {
   await admin.from('picklist').delete().eq('event_key', eventKey);
 });
 
-test('lead sees a next-match prediction and builds a persisted picklist', async ({ page }) => {
-  test.skip(!ADMIN_EMAIL || !ADMIN_PASSWORD, 'Set TEST_ADMIN_EMAIL/PASSWORD in .env.local.');
+test('lead sees a next-match prediction and builds a persisted picklist (no login)', async ({ page }) => {
+  test.skip(!URL || !SECRET, 'Set VITE_SUPABASE_URL + SUPABASE_SECRET_KEY in .env.local.');
 
-  // Log in as admin (admin >= lead, so /dashboard's RequireRole lead admits).
-  await page.goto('/login');
-  await page.getByTestId('admin-email').fill(ADMIN_EMAIL as string);
-  await page.getByTestId('admin-password').fill(ADMIN_PASSWORD as string);
-  await page.getByTestId('admin-login-submit').click();
-  await expect(page).toHaveURL(/\/admin$/, { timeout: 15_000 });
-
-  // Open the dashboard.
+  // Dashboard is open — no login gate.
   await page.goto('/dashboard');
   await expect(page.getByTestId('dashboard')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('dash-tab-next')).toBeVisible();

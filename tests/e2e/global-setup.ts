@@ -12,18 +12,32 @@ export const E2E_EVENT_KEY = '_e2etest';
 export const E2E_MATCH_KEY = '_e2etest_qm1';
 export const E2E_TEAM = 9999;
 
+// Roster names the live E2E flows pick from (auth was removed; scouters select a
+// name instead of joining with a code).
+export const E2E_ROSTER_NAMES = ['E2E Capture Scout', 'E2E Sync Scout'];
+
 export default async function globalSetup(): Promise<void> {
   loadEnv({ path: '.env.local' });
   const url = process.env.VITE_SUPABASE_URL;
   const secret = process.env.SUPABASE_SECRET_KEY;
-  const code = process.env.E2E_JOIN_CODE;
-  // Tests that depend on the live join flow skip themselves when these are
-  // unset; nothing to seed in that case.
-  if (!url || !secret || !code) return;
+  // Live flows gate on url+secret (service key). Nothing to seed without them.
+  if (!url || !secret) return;
 
   const admin = createClient(url, secret, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+
+  // Seed roster names for the login-less scouter onboarding. Tolerate a DB that
+  // hasn't had migration 0009 applied yet (table absent) — the roster-dependent
+  // specs skip themselves in that case.
+  for (const name of E2E_ROSTER_NAMES) {
+    const r = await admin.from('scouter_roster').upsert({ name }, { onConflict: 'name' });
+    if (r.error && r.error.code !== '23505') {
+      const missingTable = r.error.code === '42P01' || /scouter_roster/.test(r.error.message);
+      if (!missingTable) throw new Error(`seed roster failed: ${r.error.message}`);
+      break; // table not deployed; nothing to seed
+    }
+  }
 
   const ev = await admin
     .from('event')
@@ -32,11 +46,6 @@ export default async function globalSetup(): Promise<void> {
       { onConflict: 'event_key' },
     );
   if (ev.error) throw new Error(`seed event failed: ${ev.error.message}`);
-
-  const sec = await admin
-    .from('event_secret')
-    .upsert({ event_key: E2E_EVENT_KEY, join_code: code }, { onConflict: 'event_key' });
-  if (sec.error) throw new Error(`seed event_secret failed: ${sec.error.message}`);
 
   const team = await admin
     .from('team')

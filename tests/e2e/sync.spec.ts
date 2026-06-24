@@ -7,12 +7,13 @@ import { test, expect } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { E2E_EVENT_KEY, E2E_MATCH_KEY, E2E_TEAM } from './global-setup';
+import { setActiveEvent, ensureRosterName, pickScouter } from './helpers';
 
 loadEnv({ path: '.env.local' });
 
 const URL = process.env.VITE_SUPABASE_URL as string;
 const SECRET = process.env.SUPABASE_SECRET_KEY as string;
-const JOIN_CODE = process.env.E2E_JOIN_CODE;
+const SCOUTER = 'E2E Sync Scout';
 
 const admin: SupabaseClient = createClient(URL, SECRET, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -39,24 +40,26 @@ async function clearReports(): Promise<void> {
     .eq('target_team_number', E2E_TEAM);
 }
 
-test.beforeAll(clearReports);
+test.beforeAll(async () => {
+  test.skip(!URL || !SECRET, 'Set VITE_SUPABASE_URL + SUPABASE_SECRET_KEY in .env.local.');
+  // Needs migration 0009 (scouter_roster + select_scouter) on the target DB.
+  const probe = await admin.from('scouter_roster').select('id').limit(1);
+  test.skip(!!probe.error, 'Apply migration 0009 (scouter_roster/select_scouter) to run this flow.');
+  await setActiveEvent(admin, E2E_EVENT_KEY);
+  await ensureRosterName(admin, SCOUTER);
+  await clearReports();
+});
 test.afterAll(clearReports);
 
 test('captured report syncs to the server on reconnect with no duplicate', async ({ page }) => {
-  test.skip(!JOIN_CODE, 'Set E2E_JOIN_CODE in .env.local to run the live sync flow.');
+  test.skip(!URL || !SECRET, 'Set VITE_SUPABASE_URL + SUPABASE_SECRET_KEY in .env.local.');
 
-  // --- Join, then capture a match against the seeded match/team. ---
-  await page.goto('/join');
-  await page.getByTestId('join-code').fill(JOIN_CODE as string);
-  await page.getByTestId('join-name').fill('E2E Sync Scout');
-  await page.getByTestId('join-submit').click();
+  // --- Pick a name (no login), then capture against the seeded match/team. ---
+  await pickScouter(page, SCOUTER);
 
-  await expect(page).toHaveURL(/\/scout$/, { timeout: 15_000 });
-  await expect(page.getByTestId('scout-home')).toBeVisible();
-
-  await page.locator('#mp-event').fill(E2E_EVENT_KEY);
   await page.locator('#mp-match').fill(E2E_MATCH_KEY);
   await page.locator('#mp-team').fill(String(E2E_TEAM));
+  await expect(page.getByTestId('scout-start-capture')).toBeEnabled();
   await page.getByTestId('scout-start-capture').click();
 
   await page.getByTestId('capture-start').click();

@@ -1,58 +1,60 @@
 // tests/e2e/capture.spec.ts
-// Offline-capture round-trip: a joined scout runs a manual capture through the
-// LIVE screen (START -> GO -> hold-to-shoot bursts) and the DEFERRED review
-// (climb -> SAVE), then the report lands in the local store (Unsynced count
-// increments). The save is purely local — no server write — so this exercises
-// the offline-first path end to end with a fresh, empty IndexedDB per context.
+// Offline-capture round-trip: a scouter (picked by name — no login) runs a manual
+// capture through the LIVE screen (START -> GO -> slider-shoot bursts) and the
+// DEFERRED review (climb -> SAVE), then the report lands in the local store
+// (Unsynced count increments). Save is purely local — offline-first end to end.
 import { test, expect } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { E2E_EVENT_KEY, E2E_MATCH_KEY, E2E_TEAM } from './global-setup';
+import { setActiveEvent, ensureRosterName, pickScouter } from './helpers';
 
 loadEnv({ path: '.env.local' });
 
-const JOIN_CODE = process.env.E2E_JOIN_CODE;
+const URL = process.env.VITE_SUPABASE_URL as string;
+const SECRET = process.env.SUPABASE_SECRET_KEY as string;
+const SCOUTER = 'E2E Capture Scout';
 
-test('scout captures a match offline and it queues as unsynced', async ({ page }) => {
-  test.skip(!JOIN_CODE, 'Set E2E_JOIN_CODE in .env.local to run the live capture flow.');
+const admin: SupabaseClient = createClient(URL, SECRET, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
 
-  // --- Join (anon sign-in + join_event) and land on the scout home. ---
-  await page.goto('/join');
-  await page.getByTestId('join-code').fill(JOIN_CODE as string);
-  await page.getByTestId('join-name').fill('E2E Capture Scout');
-  await page.getByTestId('join-submit').click();
+test.beforeAll(async () => {
+  test.skip(!URL || !SECRET, 'Set VITE_SUPABASE_URL + SUPABASE_SECRET_KEY in .env.local.');
+  // The login-less flow needs migration 0009 (scouter_roster + select_scouter) on
+  // the target DB. Skip gracefully if it hasn't been applied to this deployment.
+  const probe = await admin.from('scouter_roster').select('id').limit(1);
+  test.skip(!!probe.error, 'Apply migration 0009 (scouter_roster/select_scouter) to run this flow.');
+  await setActiveEvent(admin, E2E_EVENT_KEY);
+  await ensureRosterName(admin, SCOUTER);
+});
 
-  await expect(page).toHaveURL(/\/scout$/, { timeout: 15_000 });
-  await expect(page.getByTestId('scout-home')).toBeVisible();
-  // Fresh IndexedDB for this context: nothing queued yet.
+test('scouter captures a match offline and it queues as unsynced', async ({ page }) => {
+  test.skip(!URL || !SECRET, 'Set VITE_SUPABASE_URL + SUPABASE_SECRET_KEY in .env.local.');
+
+  // Pick a name (online: binds this device to a scout row for the active event).
+  await pickScouter(page, SCOUTER);
   await expect(page.getByTestId('sync-queued')).toHaveText('↑0');
 
-  // Fill the manual pick while ONLINE and wait for the scout row to load — the
-  // start button stays disabled until scout_id resolves. We must reach that
-  // state before going offline (an offline scout fetch would never resolve).
-  await page.locator('#mp-event').fill('_e2etest');
-  await page.locator('#mp-match').fill('_e2etest_qm1');
-  await page.locator('#mp-team').fill('254');
+  // Manual pick (event is fixed to the active event); reach an enabled start.
+  await page.locator('#mp-match').fill(E2E_MATCH_KEY);
+  await page.locator('#mp-team').fill(String(E2E_TEAM));
   await expect(page.getByTestId('scout-start-capture')).toBeEnabled();
 
-  // Go offline: capture + save must work with no network, and the auto-sync
-  // must NOT drain the queue while offline.
+  // Go offline: capture + save must work with no network.
   await page.context().setOffline(true);
   await expect(page.getByTestId('sync-indicator').getByLabel('offline')).toBeVisible();
 
-  // --- Start the capture session (offline). ---
   await page.getByTestId('scout-start-capture').click();
 
-  // LIVE screen. START the synced clock (idle -> auto).
   await expect(page.getByTestId('capture-start')).toBeVisible();
   await page.getByTestId('capture-start').click();
-
-  // GO to teleop, then answer the inactive-first interstitial.
   await expect(page.getByTestId('capture-go')).toBeVisible();
   await page.getByTestId('capture-go').click();
   await expect(page.getByTestId('capture-go-interstitial')).toBeVisible();
   await page.getByTestId('capture-inactive-no').click();
 
-  // Back on the LIVE screen in teleop. Record two hold-to-shoot bursts; the
-  // running fuel readout counts bursts, so it tracks each hold.
+  // Slider-shoot: a press/release commits one fuel burst; the readout counts bursts.
   await expect(page.getByTestId('capture-running-fuel')).toHaveText('0');
   const hold = page.getByTestId('capture-hold');
   await hold.dispatchEvent('pointerdown');
@@ -62,14 +64,13 @@ test('scout captures a match offline and it queues as unsynced', async ({ page }
   await hold.dispatchEvent('pointerup');
   await expect(page.getByTestId('capture-running-fuel')).toHaveText('2');
 
-  // --- Deferred review: set a climb level, then SAVE. ---
+  // Deferred review: set a climb level, then SAVE.
   await page.getByTestId('capture-to-review').click();
   await expect(page.getByTestId('review-summary')).toBeVisible();
   await page.getByTestId('review-climb').getByRole('button', { name: '3', exact: true }).click();
   await page.getByTestId('review-save').click();
 
-  // Save clears the draft and returns to the scout home with the report queued
-  // locally — still offline, so it stays queued (not synced).
+  // Back on the scout home, still offline: the report stays queued (not synced).
   await expect(page.getByTestId('scout-home')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('sync-queued')).toHaveText('↑1');
   await expect(page.getByTestId('sync-deadletters')).toHaveText('⚠0');

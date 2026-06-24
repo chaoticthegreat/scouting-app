@@ -1,27 +1,31 @@
-// tests/e2e/admin.spec.ts — admin login -> import-already-done -> auto-generate -> publish
+// tests/e2e/admin.spec.ts — no login: open the dashboard Setup tab, auto-generate
+// assignments, and publish. (/admin redirects to /dashboard?tab=setup.)
 import { test, expect } from '@playwright/test';
 import { config as loadEnv } from 'dotenv';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
+import { setActiveEvent } from './helpers';
 
 loadEnv({ path: '.env.local' });
 
 const URL = process.env.VITE_SUPABASE_URL as string;
 const SECRET = process.env.SUPABASE_SECRET_KEY as string;
-const ADMIN_EMAIL = process.env.TEST_ADMIN_EMAIL;
-const ADMIN_PASSWORD = process.env.TEST_ADMIN_PASSWORD;
 const EVENT = '2026casnv';
 
 const admin: SupabaseClient = createClient(URL, SECRET, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-// Scout ids seeded for the active event so auto-generate has a pool.
 const seededScoutIds: string[] = [];
 
 test.beforeAll(async () => {
-  test.skip(!ADMIN_EMAIL || !ADMIN_PASSWORD, 'Set TEST_ADMIN_EMAIL/PASSWORD in .env.local.');
-  // Seed 3 scouts for the active event (2026casnv).
+  test.skip(!URL || !SECRET, 'Set VITE_SUPABASE_URL + SUPABASE_SECRET_KEY in .env.local.');
+  // The open (no-login) dashboard depends on migration 0009 (open RLS + scouter_roster).
+  const probe = await admin.from('scouter_roster').select('id').limit(1);
+  test.skip(!!probe.error, 'Apply migration 0009 (open RLS) to run the login-less dashboard flows.');
+  // Make the imported event active so the Setup tab loads its schedule + scouts.
+  await setActiveEvent(admin, EVENT);
+  // Seed 3 scouts for the active event so auto-generate has a pool.
   for (let i = 1; i <= 3; i++) {
     const { data, error } = await admin
       .from('scout')
@@ -34,24 +38,19 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  // FK-safe: assignments first, then the seeded scouts.
   await admin.from('assignment').delete().eq('event_key', EVENT);
   if (seededScoutIds.length) await admin.from('scout').delete().in('id', seededScoutIds);
 });
 
-test('admin logs in, auto-generates assignments, and publishes', async ({ page }) => {
-  test.skip(!ADMIN_EMAIL || !ADMIN_PASSWORD, 'Set TEST_ADMIN_EMAIL/PASSWORD in .env.local.');
+test('lead auto-generates assignments and publishes (no login)', async ({ page }) => {
+  test.skip(!URL || !SECRET, 'Set VITE_SUPABASE_URL + SUPABASE_SECRET_KEY in .env.local.');
 
-  await page.goto('/login');
-  await page.getByTestId('admin-email').fill(ADMIN_EMAIL as string);
-  await page.getByTestId('admin-password').fill(ADMIN_PASSWORD as string);
-  await page.getByTestId('admin-login-submit').click();
+  // /admin folds into the dashboard Setup tab — no login gate.
+  await page.goto('/admin');
+  await expect(page).toHaveURL(/\/dashboard\?tab=setup$/, { timeout: 15_000 });
+  await expect(page.getByTestId('setup-tab')).toBeVisible({ timeout: 15_000 });
 
-  // Lands on the admin page (RequireRole admin admits the logged-in admin).
-  await expect(page).toHaveURL(/\/admin$/, { timeout: 15_000 });
-  await expect(page.getByTestId('admin-page')).toBeVisible({ timeout: 15_000 });
-
-  // Auto-generate the assignment grid (event 2026casnv is already imported + active).
+  // Auto-generate the assignment grid (event 2026casnv is imported + active).
   await page.getByTestId('auto-generate-btn').click();
   await expect(page.getByTestId('assignment-grid')).toBeVisible({ timeout: 15_000 });
 
@@ -59,7 +58,6 @@ test('admin logs in, auto-generates assignments, and publishes', async ({ page }
   await page.getByTestId('publish-assignments-btn').click();
   await expect(page.getByTestId('assignments-published')).toBeVisible({ timeout: 15_000 });
 
-  // Confirm rows actually landed in the DB for this event.
   const { count, error } = await admin
     .from('assignment')
     .select('*', { count: 'exact', head: true })

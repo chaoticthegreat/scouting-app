@@ -4,26 +4,25 @@ import { config as loadEnv } from 'dotenv';
 
 loadEnv({ path: '.env.local' });
 
-const JOIN_CODE = process.env.E2E_JOIN_CODE;
-const DISPLAY_NAME = process.env.E2E_DISPLAY_NAME ?? 'E2E Scout';
-
-test('app loads and unauthenticated user lands on /join', async ({ page }) => {
+// Auth was removed: the root redirects straight to the open scouter home. A fresh
+// device has a silent anonymous session and no selected scouter, so it shows the
+// scout-home shell (either the name picker or the "no active event" message).
+test('app loads and lands on /scout (no login)', async ({ page }) => {
   await page.goto('/');
-  // Root redirects to a guarded route; unauthenticated -> /join.
-  await expect(page).toHaveURL(/\/join$/, { timeout: 10_000 });
-  await expect(page.getByTestId('join-submit')).toBeVisible();
-  await expect(page.getByTestId('join-code')).toBeVisible();
-  await expect(page.getByTestId('join-name')).toBeVisible();
+  await expect(page).toHaveURL(/\/scout$/, { timeout: 10_000 });
+  await expect(page.getByTestId('scout-home')).toBeVisible({ timeout: 10_000 });
 });
 
-test('join flow reaches /scout', async ({ page }) => {
-  test.skip(!JOIN_CODE, 'Set E2E_JOIN_CODE in .env.local to run the live join flow.');
+// The dashboard/lead views are open too — no login gate.
+test('dashboard is reachable without a login', async ({ page }) => {
+  await page.goto('/dashboard');
+  await expect(page.getByTestId('dashboard')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('dash-tab-setup')).toBeVisible();
+});
 
-  await page.goto('/join');
-  await page.getByTestId('join-code').fill(JOIN_CODE as string);
-  await page.getByTestId('join-name').fill(DISPLAY_NAME);
-  await page.getByTestId('join-submit').click();
-
-  await expect(page).toHaveURL(/\/scout$/, { timeout: 15_000 });
-  await expect(page.getByTestId('scout-home')).toBeVisible();
+// Legacy /admin alias folds into the dashboard Setup tab.
+test('/admin redirects into the dashboard Setup tab', async ({ page }) => {
+  await page.goto('/admin');
+  await expect(page).toHaveURL(/\/dashboard\?tab=setup$/, { timeout: 10_000 });
+  await expect(page.getByTestId('setup-tab')).toBeVisible({ timeout: 10_000 });
 });

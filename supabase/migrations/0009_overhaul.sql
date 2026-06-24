@@ -195,3 +195,83 @@ end;
 $$;
 
 grant execute on function upsert_match_report(jsonb) to authenticated;
+
+-- ── A5. Open the lead/drive-coach dashboard to the login-less client ────────────
+-- Auth was removed. This is a single-team internal app, so scouting data is openly
+-- readable and the lead operations (set active event, picklist, publish assignments)
+-- are open. These permissive policies COEXIST with the member/staff policies from
+-- 0003/0005 (RLS is OR across policies), so the scouter capture path is unchanged.
+
+-- Open SELECT on the dashboard read-side tables.
+drop policy if exists event_read_open on event;
+create policy event_read_open on event for select to anon, authenticated using (true);
+
+drop policy if exists team_read_open on team;
+create policy team_read_open on team for select to anon, authenticated using (true);
+
+drop policy if exists event_team_read_open on event_team;
+create policy event_team_read_open on event_team for select to anon, authenticated using (true);
+
+drop policy if exists match_read_open on match;
+create policy match_read_open on match for select to anon, authenticated using (true);
+
+drop policy if exists scout_read_open on scout;
+create policy scout_read_open on scout for select to anon, authenticated using (true);
+
+drop policy if exists assignment_read_open on assignment;
+create policy assignment_read_open on assignment for select to anon, authenticated using (true);
+
+drop policy if exists msr_read_open on match_scouting_report;
+create policy msr_read_open on match_scouting_report for select to anon, authenticated using (true);
+
+drop policy if exists pit_read_open on pit_scouting_report;
+create policy pit_read_open on pit_scouting_report for select to anon, authenticated using (true);
+
+-- Lead sets the active event from the open dashboard (is_active toggle).
+drop policy if exists event_update_open on event;
+create policy event_update_open on event
+  for update to anon, authenticated using (true) with check (true);
+
+-- Shared picklist: open read + write (was staff-only).
+drop policy if exists picklist_open on picklist;
+create policy picklist_open on picklist
+  for all to anon, authenticated using (true) with check (true);
+
+-- set_assignments: drop the admin-only gate now that the lead view is open.
+-- (Verbatim 0005 body minus the is_admin() check.)
+create or replace function set_assignments(p_event_key text, p_assignments jsonb)
+  returns int
+  language plpgsql
+  security definer
+  set search_path = public
+as $$
+declare
+  v_count int;
+begin
+  delete from assignment where event_key = p_event_key;
+
+  insert into assignment (event_key, match_key, scout_id, alliance_color, station, target_team_number, source)
+  select
+    p_event_key,
+    (elem->>'match_key'),
+    (elem->>'scout_id')::uuid,
+    (elem->>'alliance_color'),
+    (elem->>'station')::int,
+    (elem->>'target_team_number')::int,
+    'auto'
+  from jsonb_array_elements(p_assignments) as elem
+  where
+    (elem->>'scout_id') is not null
+    and exists (
+      select 1 from match m
+      where m.match_key = (elem->>'match_key')
+        and m.event_key = p_event_key
+    );
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+grant execute on function set_assignments(text, jsonb) to anon, authenticated;
+grant execute on function select_scouter(text, text) to anon, authenticated;

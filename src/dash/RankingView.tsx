@@ -7,10 +7,16 @@
 import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { aggregateEvent, type TeamAgg } from '@/dash/aggregate';
-import { useEventReports, useEventEpa, useTbaRankings } from '@/dash/useEventData';
+import { useEventReports, useEventEpa, useEventMatches, useTbaRankings } from '@/dash/useEventData';
 
 export interface RankingViewProps {
   eventKey: string;
+  /**
+   * Open a team's Team page. When provided, each row's team number becomes a
+   * button that calls this with the team number (the Dashboard then switches to
+   * the Team tab with that team preselected).
+   */
+  onSelectTeam?: (teamNumber: number) => void;
 }
 
 /** Standard TBA `/event/{key}/rankings` payload (read defensively). */
@@ -101,7 +107,7 @@ function sortValue(row: Row, key: SortKey): number {
 }
 
 export default function RankingView(props: RankingViewProps): JSX.Element {
-  const { eventKey } = props;
+  const { eventKey, onSelectTeam } = props;
 
   const reportsQuery = useEventReports(eventKey);
   const reports = reportsQuery.data;
@@ -114,11 +120,15 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
 
   const teamNumbers = useMemo(() => aggs.map((a) => a.teamNumber), [aggs]);
 
-  const epaQuery = useEventEpa(teamNumbers, eventKey);
+  // Pass the event's played matches so EPA can fall back to a local estimate
+  // (Statbotics-style, computed from real results) when Statbotics is offline.
+  const matchesQuery = useEventMatches(eventKey);
+  const epaQuery = useEventEpa(teamNumbers, eventKey, matchesQuery.data ?? []);
   const tbaQuery = useTbaRankings(eventKey);
 
   const epaByTeam = epaQuery.data?.epaByTeam;
   const epaAvailable = epaQuery.data?.available === true;
+  const epaSource = epaQuery.data?.source ?? 'none';
   const tbaRankByTeam = useMemo(() => buildTbaRankMap(tbaQuery.data), [tbaQuery.data]);
 
   const rows = useMemo<Row[]>(
@@ -225,7 +235,14 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
       <Card className="bg-card">
         <CardHeader>
           <CardTitle>Team Rankings</CardTitle>
-          {!epaAvailable ? (
+          {epaSource === 'local' ? (
+            <div
+              data-testid="dash-ranking-epa-banner"
+              className="text-xs text-amber-300"
+            >
+              Statbotics offline — EPA column shows a local estimate computed from match results.
+            </div>
+          ) : !epaAvailable ? (
             <div
               data-testid="dash-ranking-epa-banner"
               className="text-xs text-muted-foreground"
@@ -286,7 +303,21 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
                           className="h-5 w-5 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                         />
                       </td>
-                      <td className="px-2 py-2 font-medium">{t}</td>
+                      <td className="px-2 py-1 font-medium">
+                        {onSelectTeam ? (
+                          <button
+                            type="button"
+                            data-testid={`ranking-team-${t}`}
+                            onClick={() => onSelectTeam(t)}
+                            aria-label={`Open team ${t}`}
+                            className="inline-flex min-h-[44px] items-center rounded px-2 tabular-nums hover:text-brand focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          >
+                            {t}
+                          </button>
+                        ) : (
+                          <span className="tabular-nums">{t}</span>
+                        )}
+                      </td>
                       <td className="px-2 py-2 tabular-nums">{r.agg.matchesScouted}</td>
                       <td className="px-2 py-2 tabular-nums">{fmt(r.agg.scoutingExpectedPoints)}</td>
                       <td className="px-2 py-2 tabular-nums">{fmt(r.agg.meanFuelPoints)}</td>

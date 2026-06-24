@@ -1,34 +1,54 @@
 // src/dash/DashboardScreen.tsx — open (no login) lead/drive-coach hub. Landscape
-// tab bar with lucide icons: Next Match · Team · Ranking · Picklist · Roster · Setup.
-// Initial tab is read from ?tab= so the legacy /admin -> /dashboard?tab=setup alias
-// lands on Setup.
+// tab bar with lucide icons: Next Match · Team · Scouters · Match · Ranking ·
+// Picklist · Setup. Initial tab is read from ?tab= so the legacy /admin ->
+// /dashboard?tab=setup alias lands on Setup; the retired ?tab=scouter and
+// ?tab=roster both resolve to the merged Scouters tab.
 import { useState } from 'react';
-import { Swords, UserSearch, ListOrdered, ClipboardList, Users, Settings } from 'lucide-react';
+import {
+  Swords,
+  UserSearch,
+  ListOrdered,
+  ClipboardList,
+  Settings,
+  UserCheck,
+  Grid3x3,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { IconTabs } from '@/components/ui/IconTabs';
 import { useActiveEvent } from '@/dash/useActiveEvent';
 import NextMatchView from '@/dash/NextMatchView';
 import TeamView from '@/dash/TeamView';
+import MatchView from '@/dash/MatchView';
 import RankingView from '@/dash/RankingView';
 import PicklistView from '@/dash/PicklistView';
-import RosterTab from '@/dash/RosterTab';
+import ScoutersTab from '@/dash/ScoutersTab';
 import SetupTab from '@/dash/SetupTab';
 
-type Tab = 'next' | 'team' | 'ranking' | 'picklist' | 'roster' | 'setup';
+type Tab = 'next' | 'team' | 'scouters' | 'match' | 'ranking' | 'picklist' | 'setup';
 
 const TABS: { key: Tab; label: string; icon: LucideIcon; needsEvent: boolean }[] = [
   { key: 'next', label: 'Next Match', icon: Swords, needsEvent: true },
   { key: 'team', label: 'Team', icon: UserSearch, needsEvent: true },
+  { key: 'scouters', label: 'Scouters', icon: UserCheck, needsEvent: false },
+  { key: 'match', label: 'Match', icon: Grid3x3, needsEvent: true },
   { key: 'ranking', label: 'Ranking', icon: ListOrdered, needsEvent: true },
   { key: 'picklist', label: 'Picklist', icon: ClipboardList, needsEvent: true },
-  { key: 'roster', label: 'Roster', icon: Users, needsEvent: false },
   { key: 'setup', label: 'Setup', icon: Settings, needsEvent: false },
 ];
+
+/** Legacy ?tab= values that now fold into a current tab. */
+const TAB_ALIASES: Record<string, Tab> = {
+  scouter: 'scouters',
+  roster: 'scouters',
+};
 
 function initialTab(): Tab {
   try {
     const q = new URLSearchParams(window.location.search).get('tab');
-    if (q && TABS.some((t) => t.key === q)) return q as Tab;
+    if (q) {
+      if (TABS.some((t) => t.key === q)) return q as Tab;
+      if (q in TAB_ALIASES) return TAB_ALIASES[q];
+    }
   } catch {
     /* no window/search — fall through */
   }
@@ -38,9 +58,16 @@ function initialTab(): Tab {
 export default function DashboardScreen(): JSX.Element {
   const { eventKey, loading } = useActiveEvent();
   const [tab, setTab] = useState<Tab>(initialTab);
+  // Lifted so a click in Ranking can preselect the team on the Team tab.
+  const [selectedTeam, setSelectedTeam] = useState<number | null>(null);
 
   const current = TABS.find((t) => t.key === tab);
   const dataGated = current?.needsEvent ?? true;
+
+  function openTeam(teamNumber: number): void {
+    setSelectedTeam(teamNumber);
+    setTab('team');
+  }
 
   return (
     <div
@@ -52,25 +79,18 @@ export default function DashboardScreen(): JSX.Element {
         <span className="font-mono text-sm text-muted-foreground">{eventKey ?? '—'}</span>
       </header>
 
-      <nav className="flex flex-wrap gap-2">
-        {TABS.map((t) => {
+      <IconTabs<Tab>
+        ariaLabel="Dashboard sections"
+        value={tab}
+        onChange={setTab}
+        tabs={TABS.map((t) => {
           const Icon = t.icon;
-          return (
-            <Button
-              key={t.key}
-              data-testid={`dash-tab-${t.key}`}
-              variant={tab === t.key ? 'default' : 'outline'}
-              size="big"
-              className="flex-1"
-              onClick={() => setTab(t.key)}
-            >
-              <Icon /> {t.label}
-            </Button>
-          );
+          return { value: t.key, label: t.label, icon: <Icon /> };
         })}
-      </nav>
+      />
 
-      {tab === 'roster' && <RosterTab />}
+      {/* Scouters stays usable without an event (roster lives on its own table). */}
+      {tab === 'scouters' && <ScoutersTab eventKey={eventKey} />}
       {tab === 'setup' && <SetupTab />}
 
       {dataGated &&
@@ -85,8 +105,11 @@ export default function DashboardScreen(): JSX.Element {
         ) : (
           <section className="flex-1">
             {tab === 'next' && <NextMatchView eventKey={eventKey} />}
-            {tab === 'team' && <TeamView eventKey={eventKey} />}
-            {tab === 'ranking' && <RankingView eventKey={eventKey} />}
+            {tab === 'team' && <TeamView eventKey={eventKey} selectedTeam={selectedTeam} />}
+            {tab === 'match' && <MatchView eventKey={eventKey} />}
+            {tab === 'ranking' && (
+              <RankingView eventKey={eventKey} onSelectTeam={openTeam} />
+            )}
             {tab === 'picklist' && <PicklistView eventKey={eventKey} />}
           </section>
         ))}

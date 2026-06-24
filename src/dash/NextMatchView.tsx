@@ -1,21 +1,28 @@
 // src/dash/NextMatchView.tsx
-// Next-match preview (contracts §3, §8 testid `dash-next`). Picks OUR (3256)
-// next unplayed qm, gathers the 6 teams, and renders a confidence-weighted
-// prediction over scouting + Statbotics EPA — degrading gracefully when
-// Statbotics is down. Pure/injectable: the active event is passed via props
-// (the shell owns useActiveEvent), so this stays testable.
+// Broadcast-style next-match dashboard (contracts §3, §8 testid `dash-next`).
+// A hero card anchored on OUR (3256) next match leads; live "On Field" /
+// "Queuing" tiles and an "Upcoming" rail are fed by FRC Nexus when available and
+// degrade to the schedule otherwise; the confidence-weighted prediction
+// breakdown (alliance expected points, win prob, source badges, auto routines)
+// stays below. Pure/injectable: the active event is passed via props.
 
+import { useMemo, useState, type ReactNode } from 'react';
+import { Radio, Clock, Trophy, Flag } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { StatTile } from '@/components/ui/StatTile';
 import { cn } from '@/lib/utils';
 import {
   useEventMatches,
   useEventReports,
   useEventTeams,
   useEventEpa,
+  useNexusEventStatus,
   type MatchRow,
   type TeamRow,
 } from '@/dash/useEventData';
+import type { NexusEventStatus, NexusMatch } from '@/dash/nexusClient';
 import { aggregateEvent, type TeamAgg } from '@/dash/aggregate';
+import { formatMatchKey } from '@/lib/formatMatch';
 import { predictMatch, type TeamPrediction } from '@/dash/predict';
 import AutoRoutines from '@/dash/AutoRoutines';
 import { OUR_TEAM } from '@/dash/constants';
@@ -34,10 +41,10 @@ const SOURCE_LABEL: Record<TeamPrediction['source'], string> = {
 };
 
 const SOURCE_CLASS: Record<TeamPrediction['source'], string> = {
-  blend: 'bg-violet-500/20 text-violet-300 border-violet-500/40',
-  scouting: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
-  epa: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
-  none: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/40',
+  blend: 'bg-brand/15 text-brand border-brand/40',
+  scouting: 'bg-success/15 text-success border-success/40',
+  epa: 'bg-energy/15 text-energy border-energy/40',
+  none: 'bg-muted text-muted-foreground border-border',
 };
 
 function redTeamsOf(m: MatchRow): number[] {
@@ -71,6 +78,43 @@ function round(n: number): number {
   return Math.round(n);
 }
 
+/** Short HH:MM (local) for a scheduled_time ISO string, or null when absent. */
+function shortTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Short HH:MM (local) for a unix-ms timestamp, or null when absent. */
+function shortTimeMs(ms: number | null): string | null {
+  if (ms == null) return null;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Friendly one-line label for a match in the selector. */
+function matchOptionLabel(m: MatchRow): string {
+  const name = formatMatchKey(m.comp_level, m.match_number);
+  const red = redTeamsOf(m).join('/') || '—';
+  const blue = blueTeamsOf(m).join('/') || '—';
+  const time = shortTime(m.scheduled_time);
+  const played = !isUnplayed(m) ? ' · played' : '';
+  return `${name} — R ${red} vs B ${blue}${time ? ` · ${time}` : ''}${played}`;
+}
+
+/** Sort matches for the selector: by comp level (qm→sf→f) then match number. */
+const LEVEL_ORDER: Record<string, number> = { qm: 0, ef: 1, qf: 2, sf: 3, f: 4 };
+function sortMatchesForSelect(matches: MatchRow[]): MatchRow[] {
+  return matches.slice().sort((a, b) => {
+    const la = LEVEL_ORDER[a.comp_level] ?? 9;
+    const lb = LEVEL_ORDER[b.comp_level] ?? 9;
+    if (la !== lb) return la - lb;
+    return a.match_number - b.match_number;
+  });
+}
+
 function nicknameFor(teams: TeamRow[], teamNumber: number): string | null {
   return teams.find((t) => t.team_number === teamNumber)?.nickname ?? null;
 }
@@ -84,10 +128,40 @@ function FuelLowConfidenceChip() {
   return (
     <span
       data-testid="fuel-low-confidence"
-      className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-300"
+      className="inline-flex items-center rounded-full border border-warning/40 bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning"
       title="FUEL is rate-derived; treat its contribution as a low-confidence estimate."
     >
       FUEL est. — low confidence
+    </span>
+  );
+}
+
+/** A live indicator (a pulsing dot) shown when Nexus data is feeding. */
+function LiveBadge() {
+  return (
+    <span
+      data-testid="dash-next-live"
+      className="inline-flex items-center gap-1.5 rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success"
+    >
+      <span className="relative flex size-2">
+        <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
+        <span className="relative inline-flex size-2 rounded-full bg-success" />
+      </span>
+      Live
+    </span>
+  );
+}
+
+/** Small team-number chip in alliance colors. */
+function TeamChip({ team, color }: { team: number; color: 'red' | 'blue' }) {
+  return (
+    <span
+      className={cn(
+        'rounded px-1.5 py-0.5 font-mono text-xs',
+        color === 'red' ? 'bg-red-500/15 text-red-400' : 'bg-blue-500/15 text-blue-400',
+      )}
+    >
+      {team}
     </span>
   );
 }
@@ -103,17 +177,17 @@ function TeamRowView({ pred, agg, nickname }: TeamRowViewProps) {
   return (
     <li
       data-testid={`dash-next-team-${pred.teamNumber}`}
-      className="flex min-h-[44px] flex-col gap-1 rounded-md border border-zinc-700/60 bg-zinc-900/40 px-3 py-2"
+      className="flex min-h-[44px] flex-col gap-1 rounded-md border border-border bg-card/40 px-3 py-2"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="font-semibold text-zinc-100">
+        <span className="font-semibold text-foreground">
           {pred.teamNumber}
           {nickname ? (
-            <span className="ml-2 text-xs font-normal text-zinc-400">{nickname}</span>
+            <span className="ml-2 text-xs font-normal text-muted-foreground">{nickname}</span>
           ) : null}
         </span>
         <span className="flex items-center gap-2">
-          <span className="tabular-nums text-zinc-200" data-testid="dash-next-team-expected">
+          <span className="tabular-nums text-foreground" data-testid="dash-next-team-expected">
             {round(pred.expected)} pts
           </span>
           <span
@@ -127,7 +201,7 @@ function TeamRowView({ pred, agg, nickname }: TeamRowViewProps) {
           </span>
         </span>
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-400">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span>scouted: {matchesScouted}</span>
         <span>climb: {agg ? pct(agg.climbSuccessRate) : '—'}</span>
         <span>defense: {agg ? agg.avgDefenseRating.toFixed(1) : '—'}</span>
@@ -161,17 +235,17 @@ function AllianceColumn({
   return (
     <Card
       className={cn(
-        'border bg-zinc-900/60',
+        'border',
         side === 'red' ? 'border-red-500/40' : 'border-blue-500/40',
       )}
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4">
-        <CardTitle className="text-zinc-100">{label}</CardTitle>
+        <CardTitle className="text-foreground">{label}</CardTitle>
         <span
           data-testid={`dash-next-${side}-score`}
           className={cn(
             'tabular-nums text-2xl font-bold',
-            side === 'red' ? 'text-red-300' : 'text-blue-300',
+            side === 'red' ? 'text-red-400' : 'text-blue-400',
           )}
         >
           {round(score)}
@@ -196,26 +270,103 @@ function AllianceColumn({
   );
 }
 
+/** Find the Nexus match whose label corresponds to a scheduled MatchRow. */
+function nexusMatchFor(status: NexusEventStatus | null, m: MatchRow | null): NexusMatch | null {
+  if (!status || !m) return null;
+  const label = formatMatchKey(m.comp_level, m.match_number);
+  // Nexus labels are like "Qualification 12"; ours are "Qual 12". Match on the
+  // trailing number plus a shared level prefix to stay defensive.
+  return (
+    status.matches.find((nm) => {
+      const a = nm.label.toLowerCase();
+      return a.endsWith(` ${m.match_number}`) && a.split(' ')[0].startsWith(label.split(' ')[0].toLowerCase().slice(0, 4));
+    }) ?? null
+  );
+}
+
+/** A compact live-status tile (On Field / Queuing) fed by Nexus. */
+function StatusTile({
+  label,
+  match,
+  icon,
+  tone,
+}: {
+  label: string;
+  match: NexusMatch | null;
+  icon: ReactNode;
+  tone: 'brand' | 'energy';
+}) {
+  const time = match ? shortTimeMs(match.times.estimatedStartTime) : null;
+  return (
+    <StatTile
+      label={label}
+      tone={tone}
+      icon={icon}
+      value={match ? match.label : '—'}
+      sub={
+        match ? (
+          <span className="flex flex-wrap items-center gap-1">
+            {match.redTeams.map((t) => (
+              <TeamChip key={`r${t}`} team={t} color="red" />
+            ))}
+            <span className="px-0.5 text-[10px] uppercase text-muted-foreground">vs</span>
+            {match.blueTeams.map((t) => (
+              <TeamChip key={`b${t}`} team={t} color="blue" />
+            ))}
+            {time ? <span className="ml-1 text-muted-foreground">· {time}</span> : null}
+          </span>
+        ) : (
+          'No live data'
+        )
+      }
+    />
+  );
+}
+
 export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Element {
   const matchesQ = useEventMatches(eventKey);
   const reportsQ = useEventReports(eventKey);
   const teamsQ = useEventTeams(eventKey);
+  // Nexus is optional; in unit tests the data-hooks module is mocked without it,
+  // so guard against an undefined result and always degrade gracefully.
+  const nexusQ = useNexusEventStatus?.(eventKey);
+  const nexus = nexusQ?.data ?? { status: null, available: false };
+  const nexusLive = nexus.available && nexus.status != null;
 
-  const match = matchesQ.data ? pickNextMatch(matchesQ.data) : null;
+  // User-overridable selection. `null` means "follow the auto-picked next match";
+  // once the user picks, we pin to that match_key.
+  const [pinnedKey, setPinnedKey] = useState<string | null>(null);
+
+  const allMatches = useMemo(() => matchesQ.data ?? [], [matchesQ.data]);
+  const sortedMatches = useMemo(() => sortMatchesForSelect(allMatches), [allMatches]);
+  const autoMatch = useMemo(
+    () => (allMatches.length ? pickNextMatch(allMatches) : null),
+    [allMatches],
+  );
+
+  // Resolve the viewed match: pinned (if it still exists) else the auto-pick.
+  const match = useMemo(() => {
+    if (pinnedKey) {
+      const found = allMatches.find((m) => m.match_key === pinnedKey);
+      if (found) return found;
+    }
+    return autoMatch;
+  }, [pinnedKey, allMatches, autoMatch]);
+
   const redTeams = match ? redTeamsOf(match) : [];
   const blueTeams = match ? blueTeamsOf(match) : [];
   const sixTeams = [...redTeams, ...blueTeams];
 
   // Always call the hook (stable order); it is disabled internally when empty.
-  const epaQ = useEventEpa(sixTeams, eventKey);
+  // Pass matches so EPA can fall back to a local computation when Statbotics is down.
+  const epaQ = useEventEpa(sixTeams, eventKey, allMatches);
 
-  const loading =
-    matchesQ.isLoading || reportsQ.isLoading || teamsQ.isLoading;
+  const loading = matchesQ.isLoading || reportsQ.isLoading || teamsQ.isLoading;
 
   if (loading) {
     return (
-      <div data-testid="dash-next" className="text-zinc-300">
-        <div data-testid="dash-next-loading" className="p-6 text-sm text-zinc-400">
+      <div data-testid="dash-next" className="text-foreground">
+        <div data-testid="dash-next-loading" className="p-6 text-sm text-muted-foreground">
           Loading next match…
         </div>
       </div>
@@ -224,10 +375,10 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
 
   if (!match) {
     return (
-      <div data-testid="dash-next" className="text-zinc-300">
+      <div data-testid="dash-next" className="text-foreground">
         <div
           data-testid="dash-next-no-match"
-          className="rounded-md border border-zinc-700/60 bg-zinc-900/40 p-6 text-sm text-zinc-400"
+          className="rounded-md border border-border bg-card/40 p-6 text-sm text-muted-foreground"
         >
           No upcoming unplayed qualification match found.
         </div>
@@ -237,7 +388,11 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
 
   const reports = reportsQ.data ?? [];
   const allTeams = teamsQ.data ?? [];
-  const epa = epaQ.data ?? { epaByTeam: new Map<number, number | null>(), available: false };
+  const epa = epaQ.data ?? {
+    epaByTeam: new Map<number, number | null>(),
+    available: false,
+    source: 'none' as const,
+  };
 
   const agg = aggregateEvent(reports);
   const pred = predictMatch({
@@ -249,30 +404,191 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
   });
 
   const ourAllianceIsRed = redTeams.includes(OUR_TEAM);
+  const ourSide: 'red' | 'blue' = ourAllianceIsRed ? 'red' : 'blue';
   const redReports = reports.filter((r) => redTeams.includes(r.target_team_number));
   const blueReports = reports.filter((r) => blueTeams.includes(r.target_team_number));
 
+  const status = nexusLive ? nexus.status : null;
+  const heroNexus = nexusMatchFor(status, match);
+  // Prefer a Nexus live label for the hero; else the formatted schedule label.
+  const heroLabel = heroNexus?.label ?? formatMatchKey(match.comp_level, match.match_number);
+  const heroTime =
+    shortTimeMs(heroNexus?.times.estimatedStartTime ?? null) ?? shortTime(match.scheduled_time);
+
+  // Upcoming rail: prefer Nexus' ordered upcoming list, else the schedule.
+  const upcoming: Array<{ key: string; label: string; red: number[]; blue: number[]; time: string | null; isOurs: boolean }> =
+    status && status.upcoming.length > 0
+      ? status.upcoming.slice(0, 6).map((nm, i) => ({
+          key: `${nm.label}-${i}`,
+          label: nm.label,
+          red: nm.redTeams,
+          blue: nm.blueTeams,
+          time: shortTimeMs(nm.times.estimatedStartTime),
+          isOurs: nm.redTeams.includes(OUR_TEAM) || nm.blueTeams.includes(OUR_TEAM),
+        }))
+      : allMatches
+          .filter(isUnplayed)
+          .sort((a, b) => a.match_number - b.match_number)
+          .slice(0, 6)
+          .map((m) => ({
+            key: m.match_key,
+            label: formatMatchKey(m.comp_level, m.match_number),
+            red: redTeamsOf(m),
+            blue: blueTeamsOf(m),
+            time: shortTime(m.scheduled_time),
+            isOurs: redTeamsOf(m).includes(OUR_TEAM) || blueTeamsOf(m).includes(OUR_TEAM),
+          }));
+
   return (
-    <div data-testid="dash-next" className="flex flex-col gap-4 text-zinc-200">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-lg font-semibold text-zinc-100">
-          Qualification {match.match_number}
-        </h2>
-        <span
-          data-testid="dash-next-red-winprob"
-          className="rounded-md border border-zinc-700/60 bg-zinc-900/50 px-3 py-1 text-sm text-zinc-300"
+    <div data-testid="dash-next" className="flex flex-col gap-4 text-foreground">
+      {/* Hero: OUR next match. The match label is the loudest thing on the page. */}
+      <Card
+        className={cn(
+          'relative overflow-hidden border-2',
+          ourSide === 'red' ? 'border-red-500/50' : 'border-blue-500/50',
+        )}
+      >
+        <CardContent className="flex flex-col gap-3 p-5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Next match · {OUR_TEAM}
+            </span>
+            {nexusLive ? <LiveBadge /> : null}
+          </div>
+          <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+            <div>
+              <div
+                data-testid="dash-next-title"
+                className="text-4xl font-black leading-none tracking-tight text-foreground"
+              >
+                {heroLabel}
+              </div>
+              <div className="mt-2 flex items-center gap-2 text-sm">
+                <span
+                  className={cn(
+                    'rounded-full px-2.5 py-0.5 font-semibold uppercase tracking-wide',
+                    ourSide === 'red'
+                      ? 'bg-red-500/15 text-red-400'
+                      : 'bg-blue-500/15 text-blue-400',
+                  )}
+                >
+                  {ourSide} alliance
+                </span>
+                {heroTime ? (
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <Clock className="size-3.5" /> {heroTime}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Red win prob
+              </div>
+              <div
+                data-testid="dash-next-red-winprob"
+                className="text-3xl font-bold tabular-nums text-brand"
+              >
+                {pct(pred.redWinProb)}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Live field-status tiles — degrade to "No live data" when Nexus is down. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <StatusTile
+          label="On field"
+          tone="brand"
+          icon={<Radio />}
+          match={status?.onField ?? null}
+        />
+        <StatusTile
+          label="Queuing"
+          tone="energy"
+          icon={<Flag />}
+          match={status?.queuing ?? null}
+        />
+      </div>
+
+      {/* Upcoming rail — prefers Nexus order, falls back to the schedule. */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4">
+          <CardTitle className="flex items-center gap-2 text-base text-foreground">
+            <Trophy className="size-4 text-muted-foreground" /> Upcoming
+          </CardTitle>
+          {nexusLive ? <LiveBadge /> : null}
+        </CardHeader>
+        <CardContent className="p-4 pt-0">
+          {upcoming.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No upcoming matches.</p>
+          ) : (
+            <ul data-testid="dash-next-upcoming" className="flex flex-col gap-1.5">
+              {upcoming.map((u) => (
+                <li
+                  key={u.key}
+                  className={cn(
+                    'flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm',
+                    u.isOurs ? 'border-brand/40 bg-brand/5' : 'border-border bg-card/40',
+                  )}
+                >
+                  <span className="min-w-[5.5rem] font-semibold text-foreground">{u.label}</span>
+                  <span className="flex flex-1 flex-wrap items-center gap-1">
+                    {u.red.map((t) => (
+                      <TeamChip key={`r${t}`} team={t} color="red" />
+                    ))}
+                    <span className="px-0.5 text-[10px] uppercase text-muted-foreground">vs</span>
+                    {u.blue.map((t) => (
+                      <TeamChip key={`b${t}`} team={t} color="blue" />
+                    ))}
+                  </span>
+                  {u.time ? <span className="text-xs text-muted-foreground">{u.time}</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Prediction breakdown — keep the selector + per-team detail + auto routines. */}
+      <div className="flex flex-col gap-1">
+        <label htmlFor="dash-next-match-select" className="text-sm font-medium text-muted-foreground">
+          Prediction for match
+        </label>
+        <select
+          id="dash-next-match-select"
+          data-testid="dash-next-match-select"
+          value={match.match_key}
+          onChange={(e) => setPinnedKey(e.target.value)}
+          className={cn(
+            'w-full max-w-xl rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground',
+            'min-h-[44px] tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+          )}
         >
-          Red win probability: {pct(pred.redWinProb)}
-        </span>
+          {sortedMatches.map((m) => (
+            <option key={m.match_key} value={m.match_key}>
+              {matchOptionLabel(m)}
+            </option>
+          ))}
+        </select>
       </div>
 
       {!epa.available ? (
         <div
           data-testid="epa-unavailable"
           role="status"
-          className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200"
+          className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning"
         >
           Statbotics EPA unavailable — predictions use scouting only.
+        </div>
+      ) : epa.source === 'local' ? (
+        <div
+          data-testid="epa-local"
+          role="status"
+          className="rounded-md border border-energy/40 bg-energy/10 px-3 py-2 text-sm text-energy"
+        >
+          Statbotics offline — EPA estimated from this event's results.
         </div>
       ) : null}
 

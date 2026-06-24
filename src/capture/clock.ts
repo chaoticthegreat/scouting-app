@@ -8,6 +8,12 @@ export type ClockPhase = 'idle' | 'auto' | 'pause' | 'teleop' | 'done';
 export const AUTO_MS = 20000;
 export const TELEOP_MS = 140000;
 
+// Pure: remaining ms in a phase, clamped to [0, totalMs]. Used to drive the
+// count-DOWN readout (remaining = total - elapsed).
+export function remainingMs(totalMs: number, elapsedMs: number): number {
+  return Math.max(0, totalMs - elapsedMs);
+}
+
 // Order of teleop windows from teleop start onward (keys of SHIFT_BOUNDS, so it
 // excludes 'auto' — letting us index SHIFT_BOUNDS without a type error).
 const TELEOP_WINDOW_ORDER: (keyof typeof SHIFT_BOUNDS)[] = [

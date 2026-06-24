@@ -12,6 +12,7 @@ let tbaReturn: { data: unknown };
 vi.mock('@/dash/useEventData', () => ({
   useEventReports: () => reportsReturn,
   useEventEpa: () => epaReturn,
+  useEventMatches: () => ({ data: [], isLoading: false, isError: false, isSuccess: true }),
   useTbaRankings: () => tbaReturn,
 }));
 
@@ -156,6 +157,24 @@ describe('RankingView', () => {
     const { getByTestId } = render(<RankingView eventKey="2026casnv" />);
     expect(within(getByTestId('ranking-row-254')).getByTestId('tba-254').textContent).toBe('1');
     expect(within(getByTestId('ranking-row-1678')).getByTestId('tba-1678').textContent).toBe('7');
+  });
+
+  it('calls onSelectTeam with the team number when its cell button is clicked', () => {
+    reportsReturn = { data: reports, isLoading: false };
+    const onSelectTeam = vi.fn();
+    const { getByTestId } = render(
+      <RankingView eventKey="2026casnv" onSelectTeam={onSelectTeam} />,
+    );
+    fireEvent.click(getByTestId('ranking-team-254'));
+    expect(onSelectTeam).toHaveBeenCalledWith(254);
+  });
+
+  it('renders the team number as plain text when onSelectTeam is absent', () => {
+    reportsReturn = { data: reports, isLoading: false };
+    const { queryByTestId, getByTestId } = render(<RankingView eventKey="2026casnv" />);
+    expect(queryByTestId('ranking-team-254')).toBeNull();
+    // The number is still shown in the row.
+    expect(within(getByTestId('ranking-row-254')).getByText('254')).toBeTruthy();
   });
 
   it('selecting teams populates the compare panel', () => {

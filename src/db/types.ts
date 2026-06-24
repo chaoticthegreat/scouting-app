@@ -1,4 +1,4 @@
-import type { FuelBurst } from '@/scoring';
+import type { FuelBurst, TimeInterval } from '@/scoring';
 
 export interface LocalMatchReport {
   id: string;
@@ -16,6 +16,8 @@ export interface LocalMatchReport {
   inactiveFirstSource: 'derived' | 'scout' | 'official' | null;
   teleopClockUnconfirmed: boolean;
   fuelBursts: FuelBurst[];
+  // Balls fed to the human player / feeder station, captured on its own slider.
+  feedingBursts: FuelBurst[];
   autoFuel: number;
   teleopFuelActive: number;
   teleopFuelInactive: number;
@@ -37,6 +39,10 @@ export interface LocalMatchReport {
   // defense on others; defendedDurationMs = time this robot was being defended.
   defenseDurationMs: number;
   defendedDurationMs: number;
+  // Timestamped intervals backing defenseDurationMs / defendedDurationMs, so the
+  // dashboard can place "playing defense" / "being defended" on a match timeline.
+  defenseIntervals: TimeInterval[];
+  defendedIntervals: TimeInterval[];
   pins: number;
   foulsMinor: number;
   foulsMajor: number;

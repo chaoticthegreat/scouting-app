@@ -127,6 +127,34 @@ describe('useCaptureSession draft resume', () => {
   });
 });
 
+describe('useCaptureSession committedFuelCount', () => {
+  it('sums rate*(endMs-startMs)/1000 over committed bursts (rounded)', async () => {
+    await saveDraft('qm1:scout-1:254', {
+      // 26 BPS for 1s => 26 balls; 10 BPS for 2s => 20 balls; total 46.
+      bursts: [
+        { startMs: 0, endMs: 1000, rate: 26, window: 'transition' },
+        { startMs: 2000, endMs: 4000, rate: 10, window: 'shift1' },
+      ],
+      inactiveFirst: false,
+      rate: 1,
+      deferred: {},
+    });
+    const { result } = renderHook(() => useCaptureSession(target));
+    await waitFor(() => expect(result.current.bursts).toHaveLength(2));
+    expect(result.current.committedFuelCount).toBe(46);
+  });
+
+  it('exposes holdStartMs as the elapsed at hold start, null when idle', () => {
+    const { result } = renderHook(() => useCaptureSession(target));
+    expect(result.current.holdStartMs).toBeNull();
+    act(() => result.current.clock.startAuto());
+    act(() => result.current.holdStart());
+    expect(result.current.holdStartMs).not.toBeNull();
+    act(() => result.current.holdEnd(5));
+    expect(result.current.holdStartMs).toBeNull();
+  });
+});
+
 describe('useCaptureSession reAnchorCue', () => {
   it('exposes reAnchorCue that maps now into the endgame window', () => {
     const { result } = renderHook(() => useCaptureSession(target));

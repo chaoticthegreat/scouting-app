@@ -3,6 +3,7 @@ import {
   computeAggregates,
   SCHEMA_VERSION,
   type FuelBurst,
+  type TimeInterval,
   type MatchReportInputs,
 } from '@/scoring';
 import { useMatchClock, windowForBurst } from '@/capture/clock';
@@ -27,6 +28,8 @@ interface DeferredState {
   defenseRating: 0 | 1 | 2 | 3;
   defenseDurationMs: number;
   defendedDurationMs: number;
+  defenseIntervals: TimeInterval[];
+  defendedIntervals: TimeInterval[];
   pins: number;
   foulsMinor: number;
   foulsMajor: number;
@@ -51,6 +54,8 @@ const initialDeferred: DeferredState = {
   defenseRating: 0,
   defenseDurationMs: 0,
   defendedDurationMs: 0,
+  defenseIntervals: [],
+  defendedIntervals: [],
   pins: 0,
   foulsMinor: 0,
   foulsMajor: 0,
@@ -71,6 +76,9 @@ interface DraftPayload {
   inactiveFirst: boolean | null;
   rate: number;
   deferred: DeferredState;
+  // Persisted via a ref inside persistDraft (see below) so existing call sites
+  // that pass only the fuel fields don't drop feeding data.
+  feedingBursts?: FuelBurst[];
 }
 
 export function useCaptureSession(target: CaptureTarget) {
@@ -81,13 +89,50 @@ export function useCaptureSession(target: CaptureTarget) {
   );
 
   const [bursts, setBursts] = useState<FuelBurst[]>([]);
+  const [feedingBursts, setFeedingBursts] = useState<FuelBurst[]>([]);
+  // Mirror of feedingBursts so persistDraft can always write the current value
+  // without every fuel/deferred setter having to thread it through.
+  const feedingBurstsRef = useRef<FuelBurst[]>([]);
   const [inactiveFirst, setInactiveFirstState] = useState<boolean | null>(null);
   const [rate, setRateState] = useState<number>(1);
   const [deferred, setDeferred] = useState<DeferredState>(initialDeferred);
   const [draftResumed, setDraftResumed] = useState(false);
 
   const holdStartMsRef = useRef<number | null>(null);
+  // State mirror of the hold-start so the live ball-count readout re-renders
+  // when a shoot gesture begins/ends. holdStartMs is the phase-elapsed ms the
+  // current hold began at (null when not actively shooting).
+  const [holdStartMs, setHoldStartMs] = useState<number | null>(null);
+  // Fuel is INTEGRATED over the hold (∫ rate·dt), so dragging the BPS up late in
+  // a hold only adds balls for the time since the last rate change — it does NOT
+  // retroactively re-price the whole hold at the new rate (the old behavior made
+  // the count spike when you slid to 30 after holding low for a while).
+  //   holdAccumRef    — balls integrated from completed sub-segments of this hold
+  //   holdRateRef     — the rate currently being applied
+  //   holdSampleMsRef — phase-elapsed ms the current rate segment began
+  const holdAccumRef = useRef(0);
+  const holdRateRef = useRef(0);
+  const holdSampleMsRef = useRef<number | null>(null);
+  const [, setHoldTick] = useState(0); // force re-render of the live readout
   const hydratedRef = useRef(false);
+
+  // Feeding hold accumulators — exact mirror of the fuel-hold integral above, but
+  // for balls FED to the human player rather than scored. Independent so a robot
+  // can feed and score in overlapping gestures on two sliders.
+  const feedStartMsRef = useRef<number | null>(null);
+  const [feedStartMs, setFeedStartMs] = useState<number | null>(null);
+  const feedAccumRef = useRef(0);
+  const feedRateRef = useRef(0);
+  const feedSampleMsRef = useRef<number | null>(null);
+
+  // Open-interval starts for the defense / getting-defended timers. Each holds the
+  // phase-elapsed ms AND the phase it began in, so the committed interval lands on
+  // the right part of the match timeline.
+  const defenseStartRef = useRef<{ ms: number; phase: 'auto' | 'teleop' } | null>(null);
+  const defendedStartRef = useRef<{ ms: number; phase: 'auto' | 'teleop' } | null>(null);
+
+  const phaseElapsed = (): number =>
+    clock.state.phase === 'teleop' ? clock.teleopElapsedMs : clock.autoElapsedMs;
 
   // Resume an existing draft on mount.
   useEffect(() => {
@@ -101,6 +146,10 @@ export function useCaptureSession(target: CaptureTarget) {
         const s = d.state as Partial<DraftPayload>;
         if (s.bursts) {
           setBursts(s.bursts);
+        }
+        if (s.feedingBursts) {
+          setFeedingBursts(s.feedingBursts);
+          feedingBurstsRef.current = s.feedingBursts;
         }
         if (s.inactiveFirst !== undefined) {
           setInactiveFirstState(s.inactiveFirst);
@@ -127,7 +176,13 @@ export function useCaptureSession(target: CaptureTarget) {
   // event_key (which later fails the server's event-scoped RLS insert).
   const persistDraft = useCallback(
     (next: DraftPayload) => {
-      void saveDraft(draftKey, { ...next, target });
+      // Always pin the current feedingBursts from the ref so callers that only
+      // know about fuel/deferred state don't wipe feeding data on persist.
+      void saveDraft(draftKey, {
+        ...next,
+        feedingBursts: next.feedingBursts ?? feedingBurstsRef.current,
+        target,
+      });
     },
     [draftKey, target],
   );
@@ -149,22 +204,53 @@ export function useCaptureSession(target: CaptureTarget) {
   );
 
   const holdStart = useCallback(() => {
-    holdStartMsRef.current =
-      clock.state.phase === 'teleop' ? clock.teleopElapsedMs : clock.autoElapsedMs;
+    const start = phaseElapsed();
+    holdStartMsRef.current = start;
+    setHoldStartMs(start);
+    holdAccumRef.current = 0;
+    holdRateRef.current = 0;
+    holdSampleMsRef.current = start;
   }, [clock.state.phase, clock.teleopElapsedMs, clock.autoElapsedMs]);
 
-  // rateOverride lets the combined slider-shoot control commit a burst at the
-  // exact rate the user dragged to, avoiding a stale-state race with setRate.
+  // Called as the slider rate changes mid-hold. Integrates the PREVIOUS rate over
+  // the interval that just elapsed, then switches to the new rate. This is what
+  // makes the running count grow at the instantaneous BPS instead of spiking.
+  const holdSample = useCallback(
+    (nextRate: number) => {
+      if (holdSampleMsRef.current === null) return; // not holding
+      const now = phaseElapsed();
+      holdAccumRef.current +=
+        (holdRateRef.current * Math.max(0, now - holdSampleMsRef.current)) / 1000;
+      holdRateRef.current = nextRate;
+      holdSampleMsRef.current = now;
+      setHoldTick((t) => t + 1);
+    },
+    [clock.state.phase, clock.teleopElapsedMs, clock.autoElapsedMs],
+  );
+
+  // rateOverride is the slider's final rate; it's applied to the final segment
+  // (since the last sample) only — never retroactively to the whole hold.
   const holdEnd = useCallback((rateOverride?: number) => {
     const start = holdStartMsRef.current;
     if (start === null) {
       return;
     }
+    const end = phaseElapsed();
+    const finalSegRate = rateOverride ?? holdRateRef.current;
+    const sampleMs = holdSampleMsRef.current ?? start;
+    const balls =
+      holdAccumRef.current + (finalSegRate * Math.max(0, end - sampleMs)) / 1000;
     holdStartMsRef.current = null;
-    const end =
-      clock.state.phase === 'teleop' ? clock.teleopElapsedMs : clock.autoElapsedMs;
+    setHoldStartMs(null);
+    holdAccumRef.current = 0;
+    holdRateRef.current = 0;
+    holdSampleMsRef.current = null;
+
+    const durationMs = Math.max(0, end - start);
+    // Store an EFFECTIVE constant rate so the existing burst model
+    // (rate*(end-start)/1000) reproduces the integrated ball count exactly.
+    const effRate = durationMs > 0 ? (balls * 1000) / durationMs : 0;
     const window = windowForBurst(clock.state.phase, clock.teleopElapsedMs);
-    const effRate = rateOverride ?? rate;
     const burst: FuelBurst = { startMs: start, endMs: Math.max(end, start), rate: effRate, window };
     const nextBursts = [...bursts, burst];
     setBursts(nextBursts);
@@ -180,6 +266,109 @@ export function useCaptureSession(target: CaptureTarget) {
     persistDraft,
   ]);
 
+  // ── Feeding slider (mirrors the fuel hold integral) ──────────────────────────
+  const feedHoldStart = useCallback(() => {
+    const start = phaseElapsed();
+    feedStartMsRef.current = start;
+    setFeedStartMs(start);
+    feedAccumRef.current = 0;
+    feedRateRef.current = 0;
+    feedSampleMsRef.current = start;
+  }, [clock.state.phase, clock.teleopElapsedMs, clock.autoElapsedMs]);
+
+  const feedHoldSample = useCallback(
+    (nextRate: number) => {
+      if (feedSampleMsRef.current === null) return;
+      const now = phaseElapsed();
+      feedAccumRef.current +=
+        (feedRateRef.current * Math.max(0, now - feedSampleMsRef.current)) / 1000;
+      feedRateRef.current = nextRate;
+      feedSampleMsRef.current = now;
+      setHoldTick((t) => t + 1);
+    },
+    [clock.state.phase, clock.teleopElapsedMs, clock.autoElapsedMs],
+  );
+
+  const feedHoldEnd = useCallback(
+    (rateOverride?: number) => {
+      const start = feedStartMsRef.current;
+      if (start === null) return;
+      const end = phaseElapsed();
+      const finalSegRate = rateOverride ?? feedRateRef.current;
+      const sampleMs = feedSampleMsRef.current ?? start;
+      const balls = feedAccumRef.current + (finalSegRate * Math.max(0, end - sampleMs)) / 1000;
+      feedStartMsRef.current = null;
+      setFeedStartMs(null);
+      feedAccumRef.current = 0;
+      feedRateRef.current = 0;
+      feedSampleMsRef.current = null;
+
+      const durationMs = Math.max(0, end - start);
+      const effRate = durationMs > 0 ? (balls * 1000) / durationMs : 0;
+      const window = windowForBurst(clock.state.phase, clock.teleopElapsedMs);
+      const burst: FuelBurst = { startMs: start, endMs: Math.max(end, start), rate: effRate, window };
+      const next = [...feedingBurstsRef.current, burst];
+      feedingBurstsRef.current = next;
+      setFeedingBursts(next);
+      persistDraft({ bursts, inactiveFirst, rate, deferred, feedingBursts: next });
+    },
+    [
+      clock.state.phase,
+      clock.teleopElapsedMs,
+      clock.autoElapsedMs,
+      bursts,
+      inactiveFirst,
+      rate,
+      deferred,
+      persistDraft,
+    ],
+  );
+
+  // ── Defense / getting-defended timers (record timestamped intervals) ──────────
+  const phaseTag = (): 'auto' | 'teleop' =>
+    clock.state.phase === 'teleop' ? 'teleop' : 'auto';
+
+  const commitInterval = useCallback(
+    (
+      startRef: typeof defenseStartRef,
+      durationKey: 'defenseDurationMs' | 'defendedDurationMs',
+      intervalsKey: 'defenseIntervals' | 'defendedIntervals',
+    ) => {
+      const s = startRef.current;
+      if (!s) return;
+      startRef.current = null;
+      const startMs = s.ms;
+      const endMs = Math.max(phaseElapsed(), startMs);
+      const durationMs = endMs - startMs;
+      if (durationMs <= 0) return;
+      setDeferred((prev) => {
+        const next: DeferredState = {
+          ...prev,
+          [durationKey]: prev[durationKey] + durationMs,
+          [intervalsKey]: [...prev[intervalsKey], { startMs, endMs, phase: s.phase }],
+        };
+        persistDraft({ bursts, inactiveFirst, rate, deferred: next });
+        return next;
+      });
+    },
+    [clock.state.phase, clock.teleopElapsedMs, clock.autoElapsedMs, bursts, inactiveFirst, rate, persistDraft],
+  );
+
+  const beginDefense = useCallback(() => {
+    if (!defenseStartRef.current) defenseStartRef.current = { ms: phaseElapsed(), phase: phaseTag() };
+  }, [clock.state.phase, clock.teleopElapsedMs, clock.autoElapsedMs]);
+  const endDefense = useCallback(
+    () => commitInterval(defenseStartRef, 'defenseDurationMs', 'defenseIntervals'),
+    [commitInterval],
+  );
+  const beginDefended = useCallback(() => {
+    if (!defendedStartRef.current) defendedStartRef.current = { ms: phaseElapsed(), phase: phaseTag() };
+  }, [clock.state.phase, clock.teleopElapsedMs, clock.autoElapsedMs]);
+  const endDefended = useCallback(
+    () => commitInterval(defendedStartRef, 'defendedDurationMs', 'defendedIntervals'),
+    [commitInterval],
+  );
+
   const updateDeferred = useCallback(
     <K extends keyof DeferredState>(key: K, value: DeferredState[K]) => {
       setDeferred((prev) => {
@@ -194,6 +383,43 @@ export function useCaptureSession(target: CaptureTarget) {
   const reAnchorCue = useCallback(() => {
     clock.reAnchor();
   }, [clock]);
+
+  // Actual accumulated BALL COUNT from committed bursts: sum of
+  // rate*(endMs-startMs)/1000, rounded. (NOT bursts.length.)
+  const committedFuelCount = useMemo(
+    () =>
+      Math.round(
+        bursts.reduce(
+          (sum, b) => sum + (b.rate * (b.endMs - b.startMs)) / 1000,
+          0,
+        ),
+      ),
+    [bursts],
+  );
+
+  // Committed balls PLUS the in-progress integral of the active hold, so the
+  // readout grows live at the current BPS. Recomputed each render (the clock
+  // ticks ~5x/sec and holdSample bumps a tick on every rate change).
+  const inProgressFuel =
+    holdStartMsRef.current !== null && holdSampleMsRef.current !== null
+      ? holdAccumRef.current +
+        (holdRateRef.current * Math.max(0, phaseElapsed() - holdSampleMsRef.current)) / 1000
+      : 0;
+  const liveFuelCount = Math.round(committedFuelCount + inProgressFuel);
+
+  const committedFeedingCount = useMemo(
+    () =>
+      Math.round(
+        feedingBursts.reduce((sum, b) => sum + (b.rate * (b.endMs - b.startMs)) / 1000, 0),
+      ),
+    [feedingBursts],
+  );
+  const inProgressFeeding =
+    feedStartMsRef.current !== null && feedSampleMsRef.current !== null
+      ? feedAccumRef.current +
+        (feedRateRef.current * Math.max(0, phaseElapsed() - feedSampleMsRef.current)) / 1000
+      : 0;
+  const liveFeedingCount = Math.round(committedFeedingCount + inProgressFeeding);
 
   const save = useCallback(async (): Promise<string> => {
     const inputs: MatchReportInputs = {
@@ -220,6 +446,7 @@ export function useCaptureSession(target: CaptureTarget) {
       inactiveFirstSource: inactiveFirst === null ? null : 'scout',
       teleopClockUnconfirmed: clock.state.teleopClockUnconfirmed,
       fuelBursts: bursts,
+      feedingBursts,
       autoFuel: agg.autoFuel,
       teleopFuelActive: agg.teleopFuelActive,
       teleopFuelInactive: agg.teleopFuelInactive,
@@ -238,6 +465,8 @@ export function useCaptureSession(target: CaptureTarget) {
       defenseRating: deferred.defenseRating,
       defenseDurationMs: deferred.defenseDurationMs,
       defendedDurationMs: deferred.defendedDurationMs,
+      defenseIntervals: deferred.defenseIntervals,
+      defendedIntervals: deferred.defendedIntervals,
       pins: deferred.pins,
       foulsMinor: deferred.foulsMinor,
       foulsMajor: deferred.foulsMajor,
@@ -257,13 +486,25 @@ export function useCaptureSession(target: CaptureTarget) {
     await saveReport(report);
     await deleteDraft(draftKey);
     return report.id;
-  }, [inactiveFirst, bursts, deferred, clock.state.teleopClockUnconfirmed, target, draftKey]);
+  }, [inactiveFirst, bursts, feedingBursts, deferred, clock.state.teleopClockUnconfirmed, target, draftKey]);
 
   return {
     clock,
     bursts,
     holdStart,
+    holdSample,
     holdEnd,
+    holdStartMs,
+    committedFuelCount,
+    liveFuelCount,
+    // Feeding slider (parallel to the fuel/scoring slider).
+    feedingBursts,
+    feedHoldStart,
+    feedHoldSample,
+    feedHoldEnd,
+    feedStartMs,
+    committedFeedingCount,
+    liveFeedingCount,
     rate,
     setRate,
     inactiveFirst,
@@ -284,6 +525,13 @@ export function useCaptureSession(target: CaptureTarget) {
     setDefenseDurationMs: (v: number) => updateDeferred('defenseDurationMs', v),
     defendedDurationMs: deferred.defendedDurationMs,
     setDefendedDurationMs: (v: number) => updateDeferred('defendedDurationMs', v),
+    // Timestamped interval timers — call begin* on activate, end* on commit.
+    defenseIntervals: deferred.defenseIntervals,
+    defendedIntervals: deferred.defendedIntervals,
+    beginDefense,
+    endDefense,
+    beginDefended,
+    endDefended,
     pins: deferred.pins,
     setPins: (v: number) => updateDeferred('pins', v),
     foulsMinor: deferred.foulsMinor,

@@ -24,6 +24,8 @@ const buttonVariants = cva(
         // Mobile-first big touch target (>=56px) with larger text + icon for the
         // landscape, glance-and-tap scouting UI.
         big: 'min-h-[56px] rounded-lg px-6 text-lg font-semibold [&_svg]:size-6',
+        // Hero-sized primary actions on touch screens.
+        xl: 'min-h-[64px] rounded-xl px-8 text-xl font-semibold [&_svg]:size-7',
       },
     },
     defaultVariants: {

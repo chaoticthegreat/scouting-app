@@ -4,11 +4,13 @@ import { config as loadEnv } from 'dotenv';
 
 loadEnv({ path: '.env.local' });
 
-// Auth was removed: the root redirects straight to the open scouter home. A fresh
-// device has a silent anonymous session and no selected scouter, so it shows the
-// scout-home shell (either the name picker or the "no active event" message).
-test('app loads and lands on /scout (no login)', async ({ page }) => {
+// Auth was removed: the root is a landing chooser (no login gate) that forks
+// between scouting and the lead dashboard. From there a scout tap reaches the
+// open scouter home shell (name picker or "no active event" message).
+test('app loads on the landing chooser and Scout reaches /scout (no login)', async ({ page }) => {
   await page.goto('/');
+  await expect(page.getByTestId('home-screen')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('home-go-scout').click();
   await expect(page).toHaveURL(/\/scout$/, { timeout: 10_000 });
   await expect(page.getByTestId('scout-home')).toBeVisible({ timeout: 10_000 });
 });
@@ -17,7 +19,7 @@ test('app loads and lands on /scout (no login)', async ({ page }) => {
 test('dashboard is reachable without a login', async ({ page }) => {
   await page.goto('/dashboard');
   await expect(page.getByTestId('dashboard')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId('dash-tab-setup')).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Setup' })).toBeVisible();
 });
 
 // Legacy /admin alias folds into the dashboard Setup tab.

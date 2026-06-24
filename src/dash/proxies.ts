@@ -65,6 +65,29 @@ export async function statboticsGet<T>(path: string): Promise<T | ProxyUnavailab
 }
 
 /**
+ * Read through the Nexus Edge proxy. Never throws: degrades to
+ * `{ available: false }` on the sentinel body OR on any fetch/non-2xx error,
+ * so the dashboard keeps working when Nexus (live field status) is unavailable.
+ */
+export async function nexusGet<T>(path: string): Promise<T | ProxyUnavailable> {
+  try {
+    const res = await fetch(proxyUrl('nexus-proxy', path), {
+      headers: await authHeaders(),
+    });
+    if (!res.ok) {
+      return { available: false };
+    }
+    const body = (await res.json()) as unknown;
+    if (isUnavailable(body)) {
+      return { available: false };
+    }
+    return body as T;
+  } catch {
+    return { available: false };
+  }
+}
+
+/**
  * Defensively extract a team's EPA (total points) from a Statbotics
  * `team_event` payload. Prefers `epa.breakdown.total_points`, falls back to
  * `epa.total_points.mean`. Returns null when neither is a finite number.

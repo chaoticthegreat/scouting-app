@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
-import { Shield, ShieldAlert, Undo2, Flag, Play, FastForward, Timer, Plane, MoveUpRight } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Shield, ShieldAlert, Undo2, Flag, Play, FastForward, Timer, Plane, MoveUpRight, Lock, ChevronRight, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FieldDiagram, type FieldPoint } from '@/components/FieldDiagram';
 import { useCaptureEvents, type DefenseIntervalPayload } from '@/capture/useCaptureEvents';
+import { AUTO_MS, TELEOP_MS, remainingMs } from '@/capture/clock';
 import type { useCaptureSession } from '@/capture/useCaptureSession';
 
 function buzz(ms = 15): void {
@@ -28,19 +29,209 @@ function secs(ms: number): string {
 // session's holdStart/holdEnd (rate-override) without prop drilling timing.
 import { SliderShoot } from '@/capture/SliderShoot';
 
+// Distance the pointer must travel RIGHT (from its press X) to latch a lock.
+export const LOCK_SLIDE_PX = 64;
+
+/**
+ * Pure lock decision: did the pointer slide RIGHT from its press X by at least
+ * `threshold` px? Exported + pure so the gesture math is unit-testable without a
+ * real pointer (jsdom synthetic PointerEvents don't carry clientX).
+ */
+export function shouldLock(
+  startX: number,
+  clientX: number,
+  threshold: number = LOCK_SLIDE_PX,
+): boolean {
+  if (!Number.isFinite(startX) || !Number.isFinite(clientX)) return false;
+  return clientX - startX >= threshold;
+}
+
+/**
+ * Whole-button HOLD-SLIDE-LOCK control. The entire button is the control:
+ *  - press & hold        → activate + start timing
+ *  - slide right ≥ thresh → latch locked (stays active after release)
+ *  - release (not locked) → commit interval (deactivate)
+ *  - tap while locked     → commit interval (deactivate)
+ *
+ * `active` / `locked` are owned by the parent (so the underlying session interval
+ * recording is unchanged); this component only translates the pointer gesture
+ * into begin/commit/lock calls.
+ */
+function HoldSlideLockButton(props: {
+  testid: string;
+  label: string;
+  icon: JSX.Element;
+  active: boolean;
+  locked: boolean;
+  timerText: string;
+  /** begin the interval (no-op if already running) */
+  onBegin: () => void;
+  /** commit + deactivate the interval */
+  onCommit: () => void;
+  /** latch locked-on */
+  onLock: () => void;
+}): JSX.Element {
+  const { testid, label, icon, active, locked, timerText, onBegin, onCommit, onLock } = props;
+  // startX must survive re-renders (onBegin flips parent state → this re-renders;
+  // a useState start would reset to its initial value and the dx math would zero
+  // out). A ref is the correct home for the gesture's anchor X.
+  const startXRef = useRef<number | null>(null);
+  // Did THIS gesture cross the lock threshold? Checked BEFORE the `locked` branch
+  // in onPointerEnd so a gesture that just latched lock stays active on release
+  // (the previous code hit `if (locked) onCommit()` first and tore it down).
+  const slidLockedRef = useRef(false);
+  // Was the control already locked when this gesture STARTED? Captured on
+  // pointerdown so the release decision doesn't depend on the (possibly stale or
+  // mid-gesture-mutated) `locked` prop closure.
+  const wasLockedAtDownRef = useRef(false);
+  const pointerIdRef = useRef<number | null>(null);
+  const [slideProgress, setSlideProgress] = useState(0); // 0..1 toward lock
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      // setPointerCapture keeps pointermove flowing even after the finger slides
+      // off the button edge; without it the move events stop and lock never
+      // latches. It throws for inactive/synthetic pointer ids, so guard it.
+      try {
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+      } catch {
+        /* ignore — proceed without pointer capture */
+      }
+      pointerIdRef.current = e.pointerId;
+      startXRef.current = Number.isFinite(e.clientX) ? e.clientX : 0;
+      slidLockedRef.current = false;
+      wasLockedAtDownRef.current = locked;
+      if (locked) {
+        // Tap while locked → commit on release; nothing to begin on down.
+        return;
+      }
+      onBegin();
+    },
+    [locked, onBegin],
+  );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      // Ignore moves when no gesture is down or the control was already locked at
+      // press (those gestures are "tap to unlock", not slide).
+      if (startXRef.current === null || wasLockedAtDownRef.current) return;
+      const dx =
+        (Number.isFinite(e.clientX) ? e.clientX : startXRef.current) - startXRef.current;
+      setSlideProgress(Math.max(0, Math.min(1, dx / LOCK_SLIDE_PX)));
+      if (!slidLockedRef.current && shouldLock(startXRef.current, e.clientX)) {
+        slidLockedRef.current = true;
+        onLock();
+      }
+    },
+    [onLock],
+  );
+
+  const onPointerEnd = useCallback(() => {
+    const wasDown = startXRef.current !== null;
+    startXRef.current = null;
+    pointerIdRef.current = null;
+    setSlideProgress(0);
+    if (!wasDown) return;
+    // ORDER MATTERS: a gesture that latched lock THIS time must keep running —
+    // check it before the already-locked (tap-to-unlock) branch.
+    if (slidLockedRef.current) {
+      slidLockedRef.current = false;
+      return; // just latched locked this gesture; stay active with no held finger
+    }
+    if (wasLockedAtDownRef.current) {
+      // Tap while already locked → commit + deactivate.
+      onCommit();
+      return;
+    }
+    onCommit(); // plain hold-release → commit interval
+  }, [onCommit]);
+
+  return (
+    <Button
+      data-testid={testid}
+      data-active={active ? 'true' : 'false'}
+      data-locked={locked ? 'true' : 'false'}
+      variant={active ? 'default' : 'secondary'}
+      size="xl"
+      className={`relative h-full w-full touch-none select-none flex-col gap-1 overflow-hidden rounded-2xl text-lg ${
+        locked
+          ? 'bg-energy text-energy-foreground hover:bg-energy'
+          : active
+            ? 'bg-success text-success-foreground hover:bg-success'
+            : ''
+      }`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      onLostPointerCapture={onPointerEnd}
+    >
+      {/* slide-to-lock progress track (only while holding, unlocked) */}
+      {active && !locked && (
+        <div
+          data-testid={`${testid}-slide`}
+          className="pointer-events-none absolute inset-y-0 left-0 bg-energy/40"
+          style={{ width: `${slideProgress * 100}%` }}
+        />
+      )}
+      <span className="relative z-10 flex items-center gap-2 font-semibold">
+        {locked ? <Lock className="size-5" /> : icon} {label}
+      </span>
+      <span data-testid={`${testid}-timer`} className="relative z-10 text-base tabular-nums">
+        {timerText}
+      </span>
+      <span className="relative z-10 flex items-center gap-1 text-sm font-medium">
+        {locked ? (
+          <>
+            <Lock className="size-4" /> LOCKED · tap to stop
+          </>
+        ) : active ? (
+          <>
+            slide to lock <ChevronRight className="size-4" />
+          </>
+        ) : (
+          'hold'
+        )}
+      </span>
+    </Button>
+  );
+}
+
 export function CaptureScreen(props: {
   session: ReturnType<typeof useCaptureSession>;
   onToReview: () => void;
 }) {
   const s = props.session;
   const [showGo, setShowGo] = useState(false);
+  // Pre-match placement step gates the live match screen.
+  const [placed, setPlaced] = useState(false);
 
-  const fuelCount = s.bursts.length;
   const phase = s.clock.state.phase;
 
-  // Defense / being-defended press-and-hold timers (exact ms; no buckets).
+  // Running ball count = committed bursts + the live integral of the active hold
+  // (∫ rate·dt). The session owns the integration so sliding the BPS up late in a
+  // hold no longer retroactively re-prices the whole hold.
+  const fuelCount = s.liveFuelCount;
+
+  // Defense / being-defended timers. Each can be a press-and-hold OR a slide-to
+  // -lock toggle. `start` is the performance.now() the active interval began;
+  // `locked` keeps it running with no held finger. Live elapsed re-renders via a
+  // light interval tick below.
   const defenseStartRef = useRef<number | null>(null);
   const defendedStartRef = useRef<number | null>(null);
+  const [defenseLocked, setDefenseLocked] = useState(false);
+  const [defendedLocked, setDefendedLocked] = useState(false);
+  const [defenseActive, setDefenseActive] = useState(false);
+  const [defendedActive, setDefendedActive] = useState(false);
+  const [, setTick] = useState(0);
+
+  // Tick ~5x/sec while any timer is running so the displayed seconds count UP
+  // live (not only on release/unlock).
+  useEffect(() => {
+    if (!defenseActive && !defendedActive) return;
+    const id = setInterval(() => setTick((t) => t + 1), 200);
+    return () => clearInterval(id);
+  }, [defenseActive, defendedActive]);
 
   const events = useCaptureEvents({
     onUndoDefense: (p: DefenseIntervalPayload) =>
@@ -54,33 +245,123 @@ export function CaptureScreen(props: {
     },
   });
 
+  // The session now OWNS the duration + timestamped-interval bookkeeping
+  // (s.beginDefense/s.endDefense). We keep a LOCAL start only to drive the live
+  // seconds readout while the interval is open — we do NOT also accumulate into
+  // defenseDurationMs here (that would double-count what endDefense() records).
+
+  // ---- Defense (playing defense) ----
   const beginDefense = () => {
+    if (defenseStartRef.current !== null) return; // already running (e.g. locked)
     defenseStartRef.current = performance.now();
+    setDefenseActive(true);
+    s.beginDefense(); // session records the open interval start
     buzz();
   };
-  const endDefense = () => {
+  // Commit the in-progress interval and clear active + locked state.
+  const commitDefense = () => {
     const start = defenseStartRef.current;
-    if (start === null) return;
+    setDefenseLocked(false);
+    if (start === null) {
+      setDefenseActive(false);
+      return;
+    }
     defenseStartRef.current = null;
+    setDefenseActive(false);
     const end = performance.now();
     const durationMs = Math.max(0, end - start);
-    s.setDefenseDurationMs(s.defenseDurationMs + durationMs);
+    s.endDefense(); // session commits duration + interval (no manual accumulate)
     events.recordDefense({ startMs: start, endMs: end, durationMs });
+    buzz(20);
+  };
+  // Latch locked-on (interval already begun on press).
+  const lockDefense = () => {
+    setDefenseLocked(true);
+    buzz(20);
   };
 
+  // ---- Defended (getting defended) ----
   const beginDefended = () => {
+    if (defendedStartRef.current !== null) return;
     defendedStartRef.current = performance.now();
+    setDefendedActive(true);
+    s.beginDefended();
     buzz();
   };
-  const endDefended = () => {
+  const commitDefended = () => {
     const start = defendedStartRef.current;
-    if (start === null) return;
+    setDefendedLocked(false);
+    if (start === null) {
+      setDefendedActive(false);
+      return;
+    }
     defendedStartRef.current = null;
+    setDefendedActive(false);
     const end = performance.now();
     const durationMs = Math.max(0, end - start);
-    s.setDefendedDurationMs(s.defendedDurationMs + durationMs);
+    s.endDefended();
     events.recordDefended({ startMs: start, endMs: end, durationMs });
+    buzz(20);
   };
+  const lockDefended = () => {
+    setDefendedLocked(true);
+    buzz(20);
+  };
+
+  // Live displayed durations: committed total (owned by the session) + the
+  // in-progress interval measured from the LOCAL start ref.
+  const liveDefenseMs =
+    s.defenseDurationMs +
+    (defenseStartRef.current !== null
+      ? Math.max(0, performance.now() - defenseStartRef.current)
+      : 0);
+  const liveDefendedMs =
+    s.defendedDurationMs +
+    (defendedStartRef.current !== null
+      ? Math.max(0, performance.now() - defendedStartRef.current)
+      : 0);
+
+  // ---- Pre-match placement step ----
+  if (!placed) {
+    return (
+      <div className="flex min-h-screen flex-col gap-3 bg-background p-3 text-foreground">
+        <header className="flex items-center justify-between gap-3">
+          <span className="flex items-center gap-2 text-lg font-semibold">
+            <MapPin className="size-5" /> Place the robot
+          </span>
+          <span className="text-sm text-muted-foreground">
+            Tap the field where it starts
+          </span>
+        </header>
+        <div className="flex flex-1 flex-col gap-3 landscape:flex-row">
+          <div className="relative landscape:flex-1">
+            <FieldDiagram
+              mode="pick-start"
+              startPosition={s.autoStartPosition}
+              onStartChange={(p: FieldPoint) => {
+                s.setAutoStartPosition(p);
+                buzz();
+              }}
+              data-testid="capture-field"
+            />
+          </div>
+          <div className="flex flex-col justify-end gap-3 landscape:w-72">
+            <Button
+              data-testid="capture-placement-submit"
+              size="big"
+              className="text-2xl"
+              onClick={() => {
+                setPlaced(true);
+                buzz(25);
+              }}
+            >
+              <Play /> Submit / Start match
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (showGo) {
     return (
@@ -122,12 +403,20 @@ export function CaptureScreen(props: {
     );
   }
 
-  const elapsedMs = phase === 'teleop' ? s.clock.teleopElapsedMs : phase === 'auto' ? s.clock.autoElapsedMs : 0;
+  // Count-DOWN: remaining time in the active phase (auto vs teleop).
+  const remaining =
+    phase === 'teleop'
+      ? remainingMs(TELEOP_MS, s.clock.teleopElapsedMs)
+      : phase === 'auto'
+        ? remainingMs(AUTO_MS, s.clock.autoElapsedMs)
+        : phase === 'pause'
+          ? 0
+          : AUTO_MS;
   const inAuto = phase === 'auto' || phase === 'pause' || phase === 'idle';
 
   return (
     <div className="flex min-h-screen flex-col gap-3 bg-background p-3 text-foreground">
-      {/* Top bar: team badge · phase/window · timer · undo */}
+      {/* Top bar: phase/window · countdown timer · undo */}
       <header className="flex items-center justify-between gap-3">
         <span
           data-testid="capture-window"
@@ -135,14 +424,17 @@ export function CaptureScreen(props: {
         >
           {phase} · {s.clock.window}
         </span>
-        <span className="flex items-center gap-1 text-lg font-semibold tabular-nums">
-          <Timer className="size-5" /> {mmss(elapsedMs)}
+        <span
+          data-testid="capture-clock"
+          className="flex items-center gap-1 text-2xl font-bold tabular-nums"
+        >
+          <Timer className="size-6" /> {mmss(remaining)}
         </span>
         <Button
           data-testid="capture-undo"
           variant="outline"
           size="icon"
-          className="h-12 w-12"
+          className="h-14 w-14"
           aria-label="Undo last action"
           disabled={!events.canUndo}
           onClick={() => {
@@ -150,80 +442,122 @@ export function CaptureScreen(props: {
             buzz();
           }}
         >
-          <Undo2 className="size-5" />
+          <Undo2 className="size-6" />
         </Button>
       </header>
 
-      {/* Body: landscape two-column (field + controls) */}
-      <div className="flex flex-1 flex-col gap-3 landscape:flex-row">
-        <div className="relative landscape:flex-1">
-          <FieldDiagram
-            mode={phase === 'idle' || phase === 'auto' ? 'pick-start' : 'view'}
-            startPosition={s.autoStartPosition}
-            path={s.autoPath}
-            onStartChange={(p: FieldPoint) => s.setAutoStartPosition(p)}
-            data-testid="capture-field"
-          />
-          <div
-            data-testid="capture-running-fuel"
-            className="pointer-events-none absolute left-2 top-2 rounded-lg bg-background/80 px-3 py-1 text-4xl font-bold tabular-nums"
-          >
-            {fuelCount}
+      {/* Body: the field is gone after placement → full width for the controls. */}
+      <div className="flex flex-1 flex-col gap-3">
+        {/* Prominent running ball count. Live total (committed + in-progress)
+            stays big; the committed sub-count makes it clear what's "banked" so
+            the live number never feels like it runs away. */}
+        <div className="flex items-stretch gap-3">
+          <div className="flex flex-1 items-baseline gap-3 rounded-2xl border border-border bg-muted/30 px-4 py-2">
+            <span
+              data-testid="capture-running-fuel"
+              className="text-6xl font-bold leading-none tabular-nums text-energy"
+            >
+              {fuelCount}
+            </span>
+            <span className="text-sm uppercase tracking-wide text-muted-foreground">
+              fuel scored
+            </span>
+            <span className="ml-auto text-sm text-muted-foreground tabular-nums">
+              <span className="font-semibold text-success">{s.committedFuelCount}</span> banked
+            </span>
+          </div>
+          <div className="flex flex-1 items-baseline gap-3 rounded-2xl border border-border bg-muted/30 px-4 py-2">
+            <span
+              data-testid="capture-running-feed"
+              className="text-6xl font-bold leading-none tabular-nums text-brand"
+            >
+              {s.liveFeedingCount}
+            </span>
+            <span className="text-sm uppercase tracking-wide text-muted-foreground">
+              fed
+            </span>
+            <span className="ml-auto text-sm text-muted-foreground tabular-nums">
+              <span className="font-semibold text-success">{s.committedFeedingCount}</span> banked
+            </span>
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 landscape:w-72">
+        <div className="flex flex-1 flex-col gap-3">
           {/* Phase-scoped primary action */}
           {phase === 'idle' && (
-            <Button data-testid="capture-start" size="big" className="text-2xl" onClick={() => { s.clock.startAuto(); buzz(25); }}>
+            <Button data-testid="capture-start" size="xl" className="rounded-2xl text-2xl" onClick={() => { s.clock.startAuto(); buzz(25); }}>
               <Play /> START
             </Button>
           )}
           {(phase === 'auto' || phase === 'pause') && (
-            <Button data-testid="capture-go" size="big" className="text-2xl" onClick={() => setShowGo(true)}>
+            <Button data-testid="capture-go" size="xl" className="rounded-2xl bg-energy text-energy-foreground hover:bg-energy text-2xl" onClick={() => setShowGo(true)}>
               <FastForward /> GO (Teleop)
             </Button>
           )}
           {phase === 'teleop' && (
-            <Button data-testid="capture-reanchor" variant="outline" size="big" onClick={() => { s.reAnchorCue(); buzz(); }}>
+            <Button data-testid="capture-reanchor" variant="outline" size="big" className="rounded-2xl h-14 text-lg" onClick={() => { s.reAnchorCue(); buzz(); }}>
               0:30 Endgame cue
             </Button>
           )}
 
-          {/* Combined slider-shoot + defense holds */}
-          <div className="flex items-stretch gap-3">
-            <SliderShoot
-              data-testid="capture-hold"
-              onShootStart={() => { s.holdStart(); buzz(); }}
-              onShootEnd={(rate) => { s.holdEnd(rate); events.recordBurst({ rate }); buzz(20); }}
-            />
-            <div className="flex flex-1 flex-col gap-3">
-              <Button
-                data-testid="capture-defense"
-                variant="secondary"
-                size="big"
-                className="flex-1 touch-none select-none flex-col"
-                onPointerDown={beginDefense}
-                onPointerUp={endDefense}
-                onPointerLeave={endDefense}
-                onPointerCancel={endDefense}
-              >
-                <Shield /> Defense
-                <span className="text-sm tabular-nums">{secs(s.defenseDurationMs)}</span>
-              </Button>
-              <Button
-                data-testid="capture-defended"
-                variant="secondary"
-                size="big"
-                className="flex-1 touch-none select-none flex-col"
-                onPointerDown={beginDefended}
-                onPointerUp={endDefended}
-                onPointerLeave={endDefended}
-                onPointerCancel={endDefended}
-              >
-                <ShieldAlert /> Defended
-                <span className="text-sm tabular-nums">{secs(s.defendedDurationMs)}</span>
-              </Button>
+          {/* Defense / Getting-defended: whole-button HOLD-SLIDE-LOCK pair */}
+          <div className="flex items-stretch gap-3" style={{ minHeight: 96 }}>
+            <div className="flex-1">
+              <HoldSlideLockButton
+                testid="capture-defense"
+                label="Playing defense"
+                icon={<Shield className="size-5" />}
+                active={defenseActive}
+                locked={defenseLocked}
+                timerText={secs(liveDefenseMs)}
+                onBegin={beginDefense}
+                onCommit={commitDefense}
+                onLock={lockDefense}
+              />
+            </div>
+            <div className="flex-1">
+              <HoldSlideLockButton
+                testid="capture-defended"
+                label="Getting defended"
+                icon={<ShieldAlert className="size-5" />}
+                active={defendedActive}
+                locked={defendedLocked}
+                timerText={secs(liveDefendedMs)}
+                onBegin={beginDefended}
+                onCommit={commitDefended}
+                onLock={lockDefended}
+              />
+            </div>
+          </div>
+
+          {/* Parallel horizontal slider-shoots: SCORING (orange) + FEEDING (cyan).
+              Both are usable side-by-side in landscape, stacked in portrait. */}
+          <div className="flex flex-col gap-3 landscape:flex-row">
+            <div className="landscape:flex-1">
+              <SliderShoot
+                data-testid="capture-hold"
+                tone="energy"
+                unitLabel="BPS"
+                activeLabel="SHOOTING"
+                idleLabel="FUEL · hold + slide →"
+                aria-label="Scoring rate (BPS)"
+                onShootStart={() => { s.holdStart(); buzz(); }}
+                onShootRate={(r) => s.holdSample(r)}
+                onShootEnd={(rate) => { s.holdEnd(rate); events.recordBurst({ rate }); buzz(20); }}
+              />
+            </div>
+            <div className="landscape:flex-1">
+              <SliderShoot
+                data-testid="capture-feed"
+                tone="brand"
+                unitLabel="BPS"
+                activeLabel="FEEDING"
+                idleLabel="FEED · hold + slide →"
+                aria-label="Feeding rate (BPS)"
+                onShootStart={() => { s.feedHoldStart(); buzz(); }}
+                onShootRate={(r) => s.feedHoldSample(r)}
+                onShootEnd={(rate) => { s.feedHoldEnd(rate); buzz(20); }}
+              />
             </div>
           </div>
 
@@ -233,6 +567,7 @@ export function CaptureScreen(props: {
               data-testid="capture-foul"
               variant="outline"
               size="big"
+              className="rounded-2xl h-14"
               onClick={() => { s.setFoulsMinor(s.foulsMinor + 1); events.recordFoul({ kind: 'minor' }); buzz(); }}
             >
               <Flag /> Foul ({s.foulsMinor})
@@ -241,6 +576,7 @@ export function CaptureScreen(props: {
               <Button
                 variant={s.autoLeftStartingLine ? 'default' : 'outline'}
                 size="big"
+                className="rounded-2xl h-14"
                 onClick={() => { const prev = s.autoLeftStartingLine; s.setAutoLeftStartingLine(!prev); events.recordToggle({ key: 'autoLeftStartingLine', value: !prev, prev }); buzz(); }}
               >
                 <MoveUpRight /> Left Line
@@ -250,6 +586,7 @@ export function CaptureScreen(props: {
               <Button
                 variant={s.autoClimbLevel1 ? 'default' : 'outline'}
                 size="big"
+                className="rounded-2xl h-14"
                 onClick={() => { const prev = s.autoClimbLevel1; s.setAutoClimbLevel1(!prev); events.recordToggle({ key: 'autoClimbLevel1', value: !prev, prev }); buzz(); }}
               >
                 <Plane /> Auto Climb
@@ -257,7 +594,7 @@ export function CaptureScreen(props: {
             )}
           </div>
 
-          <Button data-testid="capture-to-review" variant="secondary" size="big" className="mt-auto" onClick={props.onToReview}>
+          <Button data-testid="capture-to-review" variant="secondary" size="big" className="mt-auto rounded-2xl h-14" onClick={props.onToReview}>
             To Review
           </Button>
         </div>

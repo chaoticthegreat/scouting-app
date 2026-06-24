@@ -6,6 +6,7 @@ import {
   teleopWindowAt,
   windowForBurst,
   useMatchClock,
+  remainingMs,
   AUTO_MS,
   TELEOP_MS,
 } from '@/capture/clock';
@@ -61,6 +62,18 @@ describe('teleopWindowAt boundary table', () => {
   it('exposes phase-duration constants', () => {
     expect(AUTO_MS).toBe(20000);
     expect(TELEOP_MS).toBe(140000);
+  });
+});
+
+describe('remainingMs (count-down)', () => {
+  it('counts down from total to zero as elapsed grows', () => {
+    expect(remainingMs(AUTO_MS, 0)).toBe(20000);
+    expect(remainingMs(AUTO_MS, 5000)).toBe(15000);
+    expect(remainingMs(AUTO_MS, 20000)).toBe(0);
+  });
+  it('clamps to zero past the total (never negative)', () => {
+    expect(remainingMs(AUTO_MS, 25000)).toBe(0);
+    expect(remainingMs(TELEOP_MS, 200000)).toBe(0);
   });
 });
 

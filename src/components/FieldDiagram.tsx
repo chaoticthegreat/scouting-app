@@ -138,9 +138,14 @@ export function FieldDiagram(props: FieldDiagramProps): JSX.Element {
             points={path.map((p) => `${mx(p.x)},${p.y}`).join(' ')}
           />
         )}
-        {startPosition && (
+        {/* View / draw-path start marker: a circle inside the (stretched) SVG.
+            The pick-start SQUARE marker is rendered as an HTML element below so it
+            stays a true square regardless of the field image's aspect ratio (the
+            SVG uses preserveAspectRatio="none", which would distort an SVG rect). */}
+        {startPosition && mode !== 'pick-start' && (
           <circle
             data-testid={`${testid}-marker`}
+            data-shape="circle"
             cx={mx(startPosition.x)}
             cy={startPosition.y}
             r={0.02}
@@ -178,6 +183,26 @@ export function FieldDiagram(props: FieldDiagramProps): JSX.Element {
           </g>
         ))}
       </svg>
+      {/* Pick-start marker: a true pixel SQUARE positioned over the field. */}
+      {startPosition && mode === 'pick-start' && (
+        <div
+          data-testid={`${testid}-marker`}
+          data-shape="square"
+          style={{
+            position: 'absolute',
+            left: `${mx(startPosition.x) * 100}%`,
+            top: `${startPosition.y * 100}%`,
+            width: 22,
+            height: 22,
+            transform: 'translate(-50%, -50%)',
+            background: '#f97316',
+            border: '2px solid #ffffff',
+            borderRadius: 2,
+            boxSizing: 'border-box',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -43,7 +43,11 @@ function makeReport(overrides: Partial<LocalMatchReport> = {}): LocalMatchReport
     defenseRating: 0,
 
     defenseDurationMs: 0,
-    defendedDurationMs: 0,    pins: 0,
+    defendedDurationMs: 0,
+    feedingBursts: [],
+    defenseIntervals: [],
+    defendedIntervals: [],
+    pins: 0,
     foulsMinor: 0,
     foulsMajor: 0,
     noShow: false,
@@ -67,11 +71,11 @@ async function getReport(id: string): Promise<LocalMatchReport | undefined> {
 const EXPECTED_PAYLOAD_KEYS = [
   'id', 'schema_version', 'app_version', 'device_id', 'event_key', 'match_key',
   'scout_id', 'target_team_number', 'alliance_color', 'station', 'inactive_first',
-  'inactive_first_source', 'teleop_clock_unconfirmed', 'fuel_bursts', 'climb_level',
+  'inactive_first_source', 'teleop_clock_unconfirmed', 'fuel_bursts', 'feeding_bursts', 'climb_level',
   'climb_attempted', 'climb_success', 'auto_start_position', 'auto_path',
   'auto_left_starting_line', 'auto_climb_level1', 'intake_sources',
   'max_fuel_capacity_observed', 'defense_rating', 'defense_duration_ms',
-  'defended_duration_ms', 'pins', 'fouls_minor',
+  'defended_duration_ms', 'defense_intervals', 'defended_intervals', 'pins', 'fouls_minor',
   'fouls_major', 'no_show', 'died', 'tipped', 'dropped_fuel', 'fed_corral',
   'notes', 'row_revision', 'deleted',
 ].sort();

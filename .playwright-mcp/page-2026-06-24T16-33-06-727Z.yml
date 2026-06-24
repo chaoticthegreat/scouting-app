@@ -1,0 +1,44 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - heading "Dashboard" [level=1] [ref=e5]
+    - generic [ref=e6]: 2026casnv
+  - tablist "Dashboard sections" [ref=e7]:
+    - tab "Next Match" [ref=e8] [cursor=pointer]:
+      - img [ref=e9]
+      - generic [ref=e18]: Next Match
+    - tab "Team" [ref=e19] [cursor=pointer]:
+      - img [ref=e20]
+      - generic [ref=e25]: Team
+    - tab "Scouters" [selected] [ref=e26] [cursor=pointer]:
+      - img [ref=e27]
+      - generic [ref=e31]: Scouters
+    - tab "Match" [ref=e32] [cursor=pointer]:
+      - img [ref=e33]
+      - generic [ref=e35]: Match
+    - tab "Ranking" [ref=e36] [cursor=pointer]:
+      - img [ref=e37]
+      - generic [ref=e40]: Ranking
+    - tab "Picklist" [ref=e41] [cursor=pointer]:
+      - img [ref=e42]
+      - generic [ref=e45]: Picklist
+    - tab "Setup" [ref=e46] [cursor=pointer]:
+      - img [ref=e47]
+      - generic [ref=e50]: Setup
+  - generic [ref=e51]:
+    - generic [ref=e52]:
+      - generic [ref=e53]:
+        - img [ref=e54]
+        - generic [ref=e59]: Roster (0)
+      - generic [ref=e60]:
+        - generic [ref=e61]:
+          - textbox "Scouter name" [ref=e62]
+          - button "Add" [disabled]:
+            - img
+            - text: Add
+        - list [ref=e63]:
+          - listitem [ref=e64]: No scouters yet. Add the names your team picks from on each device.
+    - region "Scouter performance" [ref=e65]:
+      - heading "Performance" [level=2] [ref=e66]:
+        - img [ref=e67]
+        - text: Performance
+      - generic [ref=e72]: Loading event data…

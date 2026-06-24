@@ -7,10 +7,25 @@ vi.mock('@/dash/useActiveEvent', () => ({
 
 // Stub the heavy tab bodies so the shell test stays isolated (no supabase/react-query).
 vi.mock('@/dash/NextMatchView', () => ({ default: () => <div data-testid="view-next" /> }));
-vi.mock('@/dash/TeamView', () => ({ default: () => <div data-testid="view-team" /> }));
-vi.mock('@/dash/RankingView', () => ({ default: () => <div data-testid="view-ranking" /> }));
+// TeamView echoes the selectedTeam prop so the ranking→team hand-off is observable.
+vi.mock('@/dash/TeamView', () => ({
+  default: ({ selectedTeam }: { selectedTeam?: number | null }) => (
+    <div data-testid="view-team" data-selected={selectedTeam ?? ''} />
+  ),
+}));
+vi.mock('@/dash/MatchView', () => ({ default: () => <div data-testid="view-match" /> }));
+// RankingView exposes a button that fires onSelectTeam, like the real team cell.
+vi.mock('@/dash/RankingView', () => ({
+  default: ({ onSelectTeam }: { onSelectTeam?: (n: number) => void }) => (
+    <div data-testid="view-ranking">
+      <button data-testid="rank-pick-254" onClick={() => onSelectTeam?.(254)}>
+        254
+      </button>
+    </div>
+  ),
+}));
 vi.mock('@/dash/PicklistView', () => ({ default: () => <div data-testid="view-picklist" /> }));
-vi.mock('@/dash/RosterTab', () => ({ default: () => <div data-testid="roster-tab" /> }));
+vi.mock('@/dash/ScoutersTab', () => ({ default: () => <div data-testid="scouters-tab" /> }));
 vi.mock('@/dash/SetupTab', () => ({ default: () => <div data-testid="setup-tab" /> }));
 
 import DashboardScreen from '../DashboardScreen';
@@ -25,17 +40,44 @@ describe('DashboardScreen', () => {
     expect(screen.getByTestId('view-next')).toBeInTheDocument();
   });
 
-  it('switches to the Roster and Setup tabs on click', () => {
+  it('switches to the Scouters and Setup tabs on click', () => {
     render(<DashboardScreen />);
-    fireEvent.click(screen.getByTestId('dash-tab-roster'));
-    expect(screen.getByTestId('roster-tab')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('dash-tab-setup'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Scouters' }));
+    expect(screen.getByTestId('scouters-tab')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Setup' }));
     expect(screen.getByTestId('setup-tab')).toBeInTheDocument();
+  });
+
+  it('switches to the Match drill-down tab on click', () => {
+    render(<DashboardScreen />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Match' }));
+    expect(screen.getByTestId('view-match')).toBeInTheDocument();
   });
 
   it('opens directly on Setup when ?tab=setup (the /admin alias)', () => {
     window.history.replaceState({}, '', '/dashboard?tab=setup');
     render(<DashboardScreen />);
     expect(screen.getByTestId('setup-tab')).toBeInTheDocument();
+  });
+
+  it('resolves the retired ?tab=scouter alias to the merged Scouters tab', () => {
+    window.history.replaceState({}, '', '/dashboard?tab=scouter');
+    render(<DashboardScreen />);
+    expect(screen.getByTestId('scouters-tab')).toBeInTheDocument();
+  });
+
+  it('resolves the retired ?tab=roster alias to the merged Scouters tab', () => {
+    window.history.replaceState({}, '', '/dashboard?tab=roster');
+    render(<DashboardScreen />);
+    expect(screen.getByTestId('scouters-tab')).toBeInTheDocument();
+  });
+
+  it('opens the Team tab with the team preselected when a ranking row is picked', () => {
+    render(<DashboardScreen />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Ranking' }));
+    fireEvent.click(screen.getByTestId('rank-pick-254'));
+    const team = screen.getByTestId('view-team');
+    expect(team).toBeInTheDocument();
+    expect(team.getAttribute('data-selected')).toBe('254');
   });
 });

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, UserRound, RefreshCw, Search } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { BarChart3, UserRound, LogOut, Search, Target, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
+import PitScoutFlow from '@/pit/PitScoutFlow';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/supabase';
@@ -16,6 +19,7 @@ import { SyncIndicator } from '@/sync/SyncIndicator';
 import { getStoredActiveEvent } from '@/dash/activeEventStore';
 import { listRoster, type RosterScouter } from '@/roster/rosterClient';
 import { selectScouter, forgetScouterName } from '@/roster/selectScouter';
+import { UpcomingMatches, matchLabelFromKey } from '@/capture/UpcomingMatches';
 
 interface AssignmentRow {
   match_key: string;
@@ -23,6 +27,16 @@ interface AssignmentRow {
   station: 1 | 2 | 3;
   target_team_number: number;
   event_key: string;
+}
+
+// A readable label for a saved draft (e.g. "Qualification 9 · Team 111") instead
+// of the raw "matchKey:scoutId:team" draft key.
+function draftTitle(d: CaptureDraft): string {
+  const target = (d.state as { target?: CaptureTarget } | null)?.target;
+  const matchKey = target?.matchKey ?? d.draftKey.split(':')[0];
+  const teamNum = target?.targetTeamNumber ?? Number(d.draftKey.split(':')[2]);
+  const label = matchLabelFromKey(matchKey);
+  return Number.isFinite(teamNum) && teamNum ? `${label} · Team ${teamNum}` : label;
 }
 
 function CaptureFlow(props: { target: CaptureTarget; onDone: () => void }) {
@@ -117,10 +131,31 @@ function NamePicker(props: { eventKey: string; onPicked: (s: ScoutRow) => void }
   );
 }
 
+type ScoutMode = 'match' | 'pit';
+
 export default function ScoutHome() {
   const { scout } = useSession();
+  // Match/Pit switch. Deep-linkable via ?mode=pit; the toggle keeps it in the URL.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mode: ScoutMode = searchParams.get('mode') === 'pit' ? 'pit' : 'match';
+  const setMode = (next: ScoutMode) => {
+    setSearchParams(
+      (prev) => {
+        const sp = new URLSearchParams(prev);
+        if (next === 'pit') sp.set('mode', 'pit');
+        else sp.delete('mode');
+        return sp;
+      },
+      { replace: true },
+    );
+  };
   const [picked, setPicked] = useState<ScoutRow | null>(null);
-  const effective = scout ?? picked;
+  // Local logout override: when true, force the NamePicker to show regardless of
+  // what useSession resolves (the device's anonymous auth.uid stays bound to a
+  // scout row until a new name is picked, so `scout` is still truthy on reload).
+  const [loggedOut, setLoggedOut] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const effective = loggedOut ? null : scout ?? picked;
   const scoutId = effective?.id ?? '';
 
   // Resolve the active event without React Query (keeps this screen provider-free).
@@ -185,13 +220,21 @@ export default function ScoutHome() {
             No active event yet. Ask your scouting lead to set the active event.
           </p>
         ) : (
-          <NamePicker eventKey={activeEvent} onPicked={setPicked} />
+          <NamePicker
+            eventKey={activeEvent}
+            onPicked={(s) => {
+              setPicked(s);
+              setLoggedOut(false);
+              setConfirmLogout(false);
+            }}
+          />
         )}
       </div>
     );
   }
 
-  if (active) {
+  // Match capture takes over the whole screen; it's only reachable in match mode.
+  if (active && mode === 'match') {
     return (
       <CaptureFlow
         target={active}
@@ -236,10 +279,13 @@ export default function ScoutHome() {
     URL.revokeObjectURL(desc.blobUrl);
   };
 
-  const switchScouter = () => {
+  const logOut = () => {
     forgetScouterName();
     setPicked(null);
     setAssignments([]);
+    setConfirmLogout(false);
+    // Force the picker even when useSession still resolves a bound scout row.
+    setLoggedOut(true);
   };
 
   return (
@@ -261,16 +307,36 @@ export default function ScoutHome() {
           >
             <BarChart3 className="size-5" /> My Data
           </a>
-          <Button
-            data-testid="scout-switch"
-            variant="ghost"
-            size="icon"
-            className="h-11 w-11"
-            aria-label="Switch scouter"
-            onClick={switchScouter}
-          >
-            <RefreshCw className="size-5" />
-          </Button>
+          {confirmLogout ? (
+            <div className="flex items-center gap-2">
+              <Button
+                data-testid="scout-logout-confirm"
+                variant="destructive"
+                className="min-h-[44px]"
+                onClick={logOut}
+              >
+                Confirm log out
+              </Button>
+              <Button
+                data-testid="scout-logout-cancel"
+                variant="ghost"
+                className="min-h-[44px]"
+                onClick={() => setConfirmLogout(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button
+              data-testid="scout-logout"
+              variant="outline"
+              className="min-h-[44px] gap-2"
+              onClick={() => setConfirmLogout(true)}
+            >
+              <LogOut className="size-5" />
+              Log out{effective.display_name ? ` (${effective.display_name})` : ''}
+            </Button>
+          )}
         </div>
       </header>
 
@@ -291,30 +357,26 @@ export default function ScoutHome() {
         </a>
       </nav>
 
-      <section>
-        <h2 className="mb-2 text-lg font-semibold">Your assignments</h2>
-        <ul className="flex flex-col gap-2">
-          {assignments.map((a, i) => (
-            <li key={`${a.match_key}-${i}`}>
-              <Button
-                data-testid="scout-assignment"
-                variant="outline"
-                size="big"
-                className="w-full justify-between"
-                onClick={() => startFromAssignment(a)}
-              >
-                <span>
-                  {a.match_key} · {a.alliance_color} {a.station}
-                </span>
-                <span>#{a.target_team_number}</span>
-              </Button>
-            </li>
-          ))}
-          {assignments.length === 0 && (
-            <li className="text-sm text-muted-foreground">No assignments.</li>
-          )}
-        </ul>
-      </section>
+      <SegmentedToggle<ScoutMode>
+        ariaLabel="Scouting mode"
+        className="max-w-md"
+        options={[
+          { value: 'match', label: 'Match', icon: <Target /> },
+          { value: 'pit', label: 'Pit', icon: <Wrench /> },
+        ]}
+        value={mode}
+        onChange={setMode}
+      />
+
+      {mode === 'pit' ? (
+        <PitScoutFlow eventKey={eventKey} scoutId={scoutId} />
+      ) : (
+        <>
+      <UpcomingMatches
+        eventKey={eventKey}
+        assignments={assignments}
+        onStart={startFromAssignment}
+      />
 
       <section data-testid="scout-manual-pick" className="rounded-lg border border-border p-3">
         <h2 className="mb-2 text-lg font-semibold">Manual pick</h2>
@@ -390,13 +452,15 @@ export default function ScoutHome() {
                   });
                 }}
               >
-                {d.draftKey}
+                {draftTitle(d)}
               </Button>
             </li>
           ))}
           {drafts.length === 0 && <li className="text-sm text-muted-foreground">No drafts.</li>}
         </ul>
       </section>
+        </>
+      )}
 
       <Button variant="secondary" size="big" onClick={() => void onExport()}>
         Export unsynced

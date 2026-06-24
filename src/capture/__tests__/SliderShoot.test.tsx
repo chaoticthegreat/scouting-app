@@ -2,23 +2,26 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { SliderShoot, rateFromPointer } from '@/capture/SliderShoot';
 
-describe('rateFromPointer', () => {
-  const rect = { top: 0, height: 200 };
-  it('returns 0 at the bottom of the track', () => {
-    expect(rateFromPointer(200, rect, 30)).toBe(0);
+describe('rateFromPointer (horizontal: left=0, right=max)', () => {
+  const rect = { left: 0, width: 200 };
+  it('returns 0 at the left edge of the track', () => {
+    expect(rateFromPointer(0, rect, 30)).toBe(0);
   });
-  it('returns max at the top of the track', () => {
-    expect(rateFromPointer(0, rect, 30)).toBe(30);
+  it('returns max at the right edge of the track', () => {
+    expect(rateFromPointer(200, rect, 30)).toBe(30);
   });
   it('returns ~half at the middle', () => {
     expect(rateFromPointer(100, rect, 30)).toBe(15);
   });
-  it('clamps above/below the track', () => {
-    expect(rateFromPointer(-50, rect, 30)).toBe(30);
-    expect(rateFromPointer(999, rect, 30)).toBe(0);
+  it('clamps left/right of the track', () => {
+    expect(rateFromPointer(-50, rect, 30)).toBe(0);
+    expect(rateFromPointer(999, rect, 30)).toBe(30);
   });
-  it('returns 0 for a zero-height track', () => {
-    expect(rateFromPointer(0, { top: 0, height: 0 }, 30)).toBe(0);
+  it('honors a non-zero left offset', () => {
+    expect(rateFromPointer(150, { left: 100, width: 200 }, 30)).toBe(8);
+  });
+  it('returns 0 for a zero-width track', () => {
+    expect(rateFromPointer(0, { left: 0, width: 0 }, 30)).toBe(0);
   });
 });
 
@@ -57,5 +60,46 @@ describe('SliderShoot gesture', () => {
     // springs back to 0 and deactivates
     expect(el.getAttribute('data-rate')).toBe('0');
     expect(el.getAttribute('data-active')).toBe('false');
+  });
+});
+
+describe('SliderShoot tone variant', () => {
+  it('defaults to the energy (orange/scoring) tone', () => {
+    render(<SliderShoot data-testid="ss" onShootStart={vi.fn()} onShootEnd={vi.fn()} />);
+    expect(screen.getByTestId('ss').getAttribute('data-tone')).toBe('energy');
+  });
+
+  it('renders the brand (feeding) tone with brand accent classes on the fill', () => {
+    render(
+      <SliderShoot
+        data-testid="feed"
+        tone="brand"
+        unitLabel="BPS"
+        activeLabel="FEEDING"
+        idleLabel="FEED · hold + slide →"
+        onShootStart={vi.fn()}
+        onShootEnd={vi.fn()}
+      />,
+    );
+    const el = screen.getByTestId('feed');
+    expect(el.getAttribute('data-tone')).toBe('brand');
+    // Brand accent (cyan) is applied to the fill track, not the energy orange.
+    const fill = screen.getByTestId('feed-fill');
+    expect(fill.className).toContain('bg-brand/40');
+    expect(fill.className).not.toContain('bg-energy');
+    // Idle hint label is shown.
+    expect(screen.getByText('FEED · hold + slide →')).toBeTruthy();
+  });
+
+  it('shows the icon + value readout (not clipped) at rate 0', () => {
+    render(<SliderShoot data-testid="ss" onShootStart={vi.fn()} onShootEnd={vi.fn()} />);
+    // The thumb (carrying the icon) is rendered and its left is inset, not at 0%,
+    // so it isn't clipped by the container's overflow-hidden at rate 0.
+    const thumb = screen.getByTestId('ss-thumb');
+    expect(thumb).toBeTruthy();
+    const left = thumb.style.left;
+    expect(left).toContain('2.25rem'); // inset applied (calc(2.25rem + ...))
+    // Value readout shows 0.
+    expect(screen.getByTestId('ss').getAttribute('data-rate')).toBe('0');
   });
 });

@@ -1,6 +1,11 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { tbaGet, statboticsGet, epaFromTeamEvent } from '@/dash/proxies';
+import { tbaGet, statboticsGet, nexusGet, epaFromTeamEvent } from '@/dash/proxies';
+import { computeLocalEpa } from '@/dash/localEpa';
+import {
+  parseNexusEventStatus,
+  type NexusEventStatus,
+} from '@/dash/nexusClient';
 import type { MsrRow } from '@/dash/types';
 
 const STALE_TIME = 60_000;
@@ -28,8 +33,31 @@ export interface MatchRow {
   result_synced_at: string | null;
 }
 
+export interface ScoutRow {
+  id: string;
+  display_name: string | null;
+  event_key: string;
+}
+
 export interface EventEpa {
   epaByTeam: Map<number, number | null>;
+  available: boolean;
+  /**
+   * Where the EPA values came from:
+   *  - 'statbotics': live Statbotics EPA for at least one team.
+   *  - 'local': Statbotics was down for ALL teams, so we computed a simplified
+   *    local EPA from this event's played match results (see computeLocalEpa).
+   *  - 'none': neither source produced anything (e.g. no matches passed in).
+   * Additive + OPTIONAL so existing object-literal fixtures (e.g. RankingView /
+   * TeamView tests owned by another agent) keep type-checking. `useEventEpa`
+   * ALWAYS sets it, so hook consumers can rely on a concrete value.
+   */
+  source?: 'statbotics' | 'local' | 'none';
+}
+
+/** Parsed Nexus live status plus an availability flag for graceful degradation. */
+export interface NexusStatusResult {
+  status: NexusEventStatus | null;
   available: boolean;
 }
 
@@ -95,6 +123,25 @@ export function useEventTeams(eventKey: string | null): UseQueryResult<TeamRow[]
   });
 }
 
+/** Scouters registered for an event (read from the open `scout` table, 0009 RLS). */
+export function useEventScouts(eventKey: string | null): UseQueryResult<ScoutRow[]> {
+  return useQuery({
+    queryKey: ['scouts', eventKey],
+    enabled: !!eventKey,
+    staleTime: STALE_TIME,
+    queryFn: async (): Promise<ScoutRow[]> => {
+      const { data, error } = await supabase
+        .from('scout')
+        .select('id,display_name,event_key')
+        .eq('event_key', eventKey as string);
+      if (error) {
+        throw error;
+      }
+      return (data ?? []) as ScoutRow[];
+    },
+  });
+}
+
 /** TBA event rankings (through the tba-proxy). */
 export function useTbaRankings<T = unknown>(eventKey: string | null): UseQueryResult<T> {
   return useQuery({
@@ -106,18 +153,37 @@ export function useTbaRankings<T = unknown>(eventKey: string | null): UseQueryRe
 }
 
 /**
- * Statbotics EPA for a set of teams at an event. Degrades gracefully: a team
- * whose proxy call returns the unavailable sentinel (or has no parseable EPA)
- * maps to null. `available` is false only when EVERY team came back
- * unavailable — i.e. Statbotics is down.
+ * Statbotics EPA for a set of teams at an event, with a local fallback.
+ *
+ * Degrades gracefully: a team whose Statbotics proxy call returns the
+ * unavailable sentinel (or has no parseable EPA) maps to null. When Statbotics
+ * is down for EVERY team, we compute a simplified local EPA from `matches`
+ * (this event's played results) and populate the requested teams instead.
+ *
+ * `source` reports which path produced the values: 'statbotics' | 'local' |
+ * 'none'. `available` is true when either source yields data.
+ *
+ * NOTE FOR INTEGRATORS: `matches` is OPTIONAL (default []) so existing 2-arg
+ * callers (e.g. RankingView.tsx, TeamView.tsx — owned by another agent) keep
+ * type-checking. When `matches` is empty the local fallback simply can't
+ * compute, so `source` stays 'none' (identical to the pre-fallback behavior).
+ * To enable the local fallback in those views, pass the event's MatchRow[] as
+ * the third argument.
  */
 export function useEventEpa(
   teamNumbers: number[],
   eventKey: string | null,
+  matches: MatchRow[] = [],
 ): UseQueryResult<EventEpa> {
   const sortedTeams = [...teamNumbers].sort((a, b) => a - b);
+  // A cheap, stable signature of the played matches so the query refetches when
+  // results change but not on every render.
+  const matchesSig = matches
+    .filter((m) => m.actual_red_score != null && m.actual_blue_score != null)
+    .map((m) => `${m.match_key}:${m.actual_red_score}-${m.actual_blue_score}`)
+    .join(',');
   return useQuery({
-    queryKey: ['epa', eventKey, sortedTeams.join(',')],
+    queryKey: ['epa', eventKey, sortedTeams.join(','), matchesSig],
     enabled: !!eventKey && sortedTeams.length > 0,
     staleTime: STALE_TIME,
     queryFn: async (): Promise<EventEpa> => {
@@ -144,7 +210,55 @@ export function useEventEpa(
         epaByTeam.set(team, epaFromTeamEvent(json));
       }
 
-      return { epaByTeam, available: anyAvailable };
+      if (anyAvailable) {
+        return { epaByTeam, available: true, source: 'statbotics' };
+      }
+
+      // Statbotics down for every team -> try the local fallback from results.
+      const localEpa = computeLocalEpa(matches);
+      if (localEpa.size > 0) {
+        let anyLocal = false;
+        for (const team of sortedTeams) {
+          const v = localEpa.get(team);
+          if (v !== undefined) {
+            epaByTeam.set(team, v);
+            anyLocal = true;
+          } else {
+            epaByTeam.set(team, null);
+          }
+        }
+        if (anyLocal) {
+          return { epaByTeam, available: true, source: 'local' };
+        }
+      }
+
+      return { epaByTeam, available: false, source: 'none' };
+    },
+  });
+}
+
+/**
+ * Live field status for an event from FRC Nexus (through nexus-proxy). Short
+ * staleTime for liveness. Returns a parsed status + an `available` flag that is
+ * false when Nexus is unavailable/unset, so callers can degrade to the schedule.
+ */
+export function useNexusEventStatus(
+  eventKey: string | null,
+): UseQueryResult<NexusStatusResult> {
+  return useQuery({
+    queryKey: ['nexus', 'event', eventKey],
+    enabled: !!eventKey,
+    staleTime: 15_000,
+    queryFn: async (): Promise<NexusStatusResult> => {
+      const json = await nexusGet<unknown>(`/event/${eventKey}`);
+      const unavailable =
+        typeof json === 'object' &&
+        json !== null &&
+        (json as { available?: unknown }).available === false;
+      if (unavailable) {
+        return { status: null, available: false };
+      }
+      return { status: parseNexusEventStatus(json), available: true };
     },
   });
 }

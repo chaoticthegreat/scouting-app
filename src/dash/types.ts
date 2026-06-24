@@ -8,6 +8,21 @@ export interface FieldPoint {
   y: number;
 }
 
+/** Window-tagged shooting/feeding burst as stored in the `*_bursts` jsonb. */
+export interface BurstRow {
+  startMs: number;
+  endMs: number;
+  rate: number;
+  window: string;
+}
+
+/** Phase-tagged activity interval as stored in the `*_intervals` jsonb. */
+export interface IntervalRow {
+  startMs: number;
+  endMs: number;
+  phase: 'auto' | 'teleop';
+}
+
 /** A single `match_scouting_report` row as read by the dashboard (contracts §1). */
 export interface MsrRow {
   target_team_number: number;
@@ -33,6 +48,16 @@ export interface MsrRow {
   defense_rating: number;
   pins: number;
 
+  // Timestamped activity, used to reconstruct a per-match timeline. Optional:
+  // legacy rows predate these columns (and they're empty until migration 0010 is
+  // deployed and a match is re-scouted). Consumers must null-guard.
+  fuel_bursts?: BurstRow[] | null;
+  feeding_bursts?: BurstRow[] | null;
+  defense_intervals?: IntervalRow[] | null;
+  defended_intervals?: IntervalRow[] | null;
+  defense_duration_ms?: number | null;
+  defended_duration_ms?: number | null;
+
   no_show: boolean;
   died: boolean;
   tipped: boolean;
@@ -41,6 +66,13 @@ export interface MsrRow {
 
   auto_start_position: FieldPoint | null;
   auto_path: FieldPoint[] | null;
+
+  // Attribution: which scouter submitted this report, and any free-text notes.
+  // The DB row has these columns; SELECT uses `*`, so they arrive automatically.
+  // Optional/nullable: legacy fixtures and anon rows may omit them. Every consumer
+  // null-guards these, so `undefined` is treated the same as `null`.
+  scout_id?: string | null;
+  notes?: string | null;
 
   server_received_at: string;
   deleted: boolean;

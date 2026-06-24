@@ -3,6 +3,7 @@ export { SCHEMA_VERSION, SCORING } from './constants';
 export type {
   MatchWindow,
   FuelBurst,
+  TimeInterval,
   MatchReportInputs,
   MatchReportAggregates,
 } from './types';

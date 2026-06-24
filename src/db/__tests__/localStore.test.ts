@@ -61,7 +61,11 @@ function makeReport(overrides: Partial<LocalMatchReport> = {}): LocalMatchReport
     defenseRating: 0,
 
     defenseDurationMs: 0,
-    defendedDurationMs: 0,    pins: 0,
+    defendedDurationMs: 0,
+    feedingBursts: [],
+    defenseIntervals: [],
+    defendedIntervals: [],
+    pins: 0,
     foulsMinor: 0,
     foulsMajor: 0,
     noShow: false,

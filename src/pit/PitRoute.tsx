@@ -1,15 +1,12 @@
-// src/pit/PitRoute.tsx — minimal /pit entry: pick a team, then render PitScoutScreen.
-import { useState } from 'react';
+// src/pit/PitRoute.tsx — legacy /pit entry. The canonical entry is now the
+// Match/Pit toggle on ScoutHome (/scout?mode=pit); the router redirects /pit
+// there. Kept as a thin wrapper around the shared PitScoutFlow so it still
+// works if mounted directly.
 import { useSession } from '@/auth/useSession';
-import PitScoutScreen from './PitScoutScreen';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
+import PitScoutFlow from './PitScoutFlow';
 
 export default function PitRoute(): JSX.Element {
   const { scout } = useSession();
-  const [teamInput, setTeamInput] = useState('');
-  const [team, setTeam] = useState<number | null>(null);
 
   if (!scout) {
     return (
@@ -19,33 +16,9 @@ export default function PitRoute(): JSX.Element {
     );
   }
 
-  if (team === null) {
-    const valid = /^\d+$/.test(teamInput.trim());
-    return (
-      <main data-testid="pit-route" className="mx-auto flex max-w-sm flex-col gap-4 p-6">
-        <h1 className="text-xl font-bold">Pit Scouting</h1>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="pit-team-input">Team number</Label>
-          <Input
-            id="pit-team-input"
-            data-testid="pit-team-input"
-            inputMode="numeric"
-            value={teamInput}
-            onChange={(e) => setTeamInput(e.target.value)}
-            className="h-11"
-          />
-        </div>
-        <Button
-          data-testid="pit-team-go"
-          className="h-11"
-          disabled={!valid}
-          onClick={() => setTeam(Number(teamInput.trim()))}
-        >
-          Start pit scouting
-        </Button>
-      </main>
-    );
-  }
-
-  return <PitScoutScreen eventKey={scout.event_key} teamNumber={team} scoutId={scout.id} />;
+  return (
+    <main data-testid="pit-route" className="mx-auto flex max-w-md flex-col gap-4 p-6">
+      <PitScoutFlow eventKey={scout.event_key} scoutId={scout.id} />
+    </main>
+  );
 }

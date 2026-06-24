@@ -36,20 +36,47 @@ vi.mock('@/lib/supabase', () => ({
 // --- proxies mock ---
 const tbaGetMock = vi.fn();
 const statboticsGetMock = vi.fn();
+const nexusGetMock = vi.fn();
 const epaFromTeamEventMock = vi.fn();
 vi.mock('@/dash/proxies', () => ({
   tbaGet: (path: string) => tbaGetMock(path),
   statboticsGet: (path: string) => statboticsGetMock(path),
+  nexusGet: (path: string) => nexusGetMock(path),
   epaFromTeamEvent: (json: unknown) => epaFromTeamEventMock(json),
 }));
 
+import type { MatchRow } from '../useEventData';
 import {
   useEventReports,
   useEventMatches,
   useEventTeams,
+  useEventScouts,
   useTbaRankings,
   useEventEpa,
+  useNexusEventStatus,
 } from '../useEventData';
+
+/** Minimal played MatchRow factory for the local-EPA fallback tests. */
+function playedMatch(o: Partial<MatchRow>): MatchRow {
+  return {
+    match_key: '2026casnv_qm1',
+    event_key: '2026casnv',
+    comp_level: 'qm',
+    match_number: 1,
+    scheduled_time: null,
+    red1: null,
+    red2: null,
+    red3: null,
+    blue1: null,
+    blue2: null,
+    blue3: null,
+    actual_red_score: null,
+    actual_blue_score: null,
+    winner: null,
+    result_synced_at: null,
+    ...o,
+  };
+}
 import { useActiveEvent } from '../useActiveEvent';
 
 function wrapper() {
@@ -66,6 +93,7 @@ describe('useEventData', () => {
     fromMock.mockClear();
     tbaGetMock.mockReset();
     statboticsGetMock.mockReset();
+    nexusGetMock.mockReset();
     epaFromTeamEventMock.mockReset();
     for (const k of Object.keys(tableResults)) delete tableResults[k];
   });
@@ -105,6 +133,20 @@ describe('useEventData', () => {
     expect(result.current.data).toEqual([{ team_number: 254, nickname: 'Cheesy' }]);
   });
 
+  it('useEventScouts resolves scouts for the event', async () => {
+    tableResults['scout'] = {
+      data: [{ id: 's1', display_name: 'Ada', event_key: '2026casnv' }],
+      error: null,
+    };
+    const { result } = renderHook(() => useEventScouts('2026casnv'), { wrapper: wrapper() });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual([
+      { id: 's1', display_name: 'Ada', event_key: '2026casnv' },
+    ]);
+    expect(fromMock).toHaveBeenCalledWith('scout');
+  });
+
   it('useTbaRankings calls tbaGet with the rankings path', async () => {
     tbaGetMock.mockResolvedValue({ rankings: [] });
     const { result } = renderHook(() => useTbaRankings('2026casnv'), { wrapper: wrapper() });
@@ -135,12 +177,13 @@ describe('useEventData', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.available).toBe(true);
+    expect(result.current.data?.source).toBe('statbotics');
     expect(result.current.data?.epaByTeam.get(254)).toBe(50);
     // 1678 came back unavailable → null in the map.
     expect(result.current.data?.epaByTeam.get(1678)).toBeNull();
   });
 
-  it('useEventEpa returns { available: false } when Statbotics is down for every team', async () => {
+  it('useEventEpa source is none with no matches when Statbotics is down for every team', async () => {
     statboticsGetMock.mockResolvedValue({ available: false });
 
     const { result } = renderHook(() => useEventEpa([254, 1678], '2026casnv'), {
@@ -149,8 +192,66 @@ describe('useEventData', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.available).toBe(false);
+    expect(result.current.data?.source).toBe('none');
     expect(result.current.data?.epaByTeam.get(254)).toBeNull();
     expect(result.current.data?.epaByTeam.get(1678)).toBeNull();
+  });
+
+  it('useEventEpa falls back to local EPA from matches when Statbotics is down', async () => {
+    statboticsGetMock.mockResolvedValue({ available: false });
+
+    const matches: MatchRow[] = [
+      playedMatch({
+        match_number: 1,
+        red1: 254,
+        red2: 1,
+        red3: 2,
+        blue1: 1678,
+        blue2: 3,
+        blue3: 4,
+        actual_red_score: 90,
+        actual_blue_score: 60,
+      }),
+    ];
+
+    const { result } = renderHook(() => useEventEpa([254, 1678], '2026casnv', matches), {
+      wrapper: wrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.available).toBe(true);
+    expect(result.current.data?.source).toBe('local');
+    // Winning red 254 should sit above losing blue 1678.
+    const a = result.current.data?.epaByTeam.get(254) as number;
+    const b = result.current.data?.epaByTeam.get(1678) as number;
+    expect(a).toBeGreaterThan(b);
+  });
+
+  it('useNexusEventStatus parses live status when Nexus is available', async () => {
+    nexusGetMock.mockResolvedValue({
+      eventKey: '2026casnv',
+      nowQueuing: 'Qualification 5',
+      matches: [
+        { label: 'Qualification 5', status: 'Now queuing', redTeams: ['1'], blueTeams: ['2'], times: {} },
+      ],
+    });
+
+    const { result } = renderHook(() => useNexusEventStatus('2026casnv'), { wrapper: wrapper() });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.available).toBe(true);
+    expect(result.current.data?.status?.nowQueuing).toBe('Qualification 5');
+    expect(nexusGetMock).toHaveBeenCalledWith('/event/2026casnv');
+  });
+
+  it('useNexusEventStatus degrades to unavailable when Nexus is down', async () => {
+    nexusGetMock.mockResolvedValue({ available: false });
+
+    const { result } = renderHook(() => useNexusEventStatus('2026casnv'), { wrapper: wrapper() });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.available).toBe(false);
+    expect(result.current.data?.status).toBeNull();
   });
 });
 

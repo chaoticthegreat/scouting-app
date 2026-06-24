@@ -89,6 +89,38 @@ describe('FieldDiagram pick-start', () => {
   });
 });
 
+describe('FieldDiagram pick-start marker shape', () => {
+  it('renders a TRUE pixel SQUARE marker for the picked start in pick-start mode', () => {
+    const { container } = render(
+      <FieldDiagram mode="pick-start" startPosition={{ x: 0.4, y: 0.6 }} />
+    );
+    const marker = container.querySelector(
+      '[data-testid="field-diagram-marker"]'
+    ) as HTMLElement | null;
+    expect(marker).toBeTruthy();
+    expect(marker?.getAttribute('data-shape')).toBe('square');
+    // An HTML element (not a stretched SVG rect), positioned over the field at
+    // the picked point (x=0.4 -> 40%, y=0.6 -> 60%) and centered on it.
+    expect(marker?.tagName.toLowerCase()).toBe('div');
+    expect(marker?.style.left).toBe('40%');
+    expect(marker?.style.top).toBe('60%');
+    // Equal width & height in pixels => a genuine square regardless of the
+    // field image's (wide) aspect ratio.
+    expect(marker?.style.width).toBe(marker?.style.height);
+    expect(marker?.style.width).toBe('22px');
+  });
+
+  it('still renders a circle marker in view mode', () => {
+    const { container } = render(
+      <FieldDiagram mode="view" startPosition={{ x: 0.4, y: 0.6 }} />
+    );
+    const marker = container.querySelector(
+      '[data-testid="field-diagram-marker"]'
+    );
+    expect(marker?.tagName.toLowerCase()).toBe('circle');
+  });
+});
+
 describe('FieldDiagram draw-path', () => {
   it('emits a path with >= 2 points on pointerdown..move..up', () => {
     const onPathChange = vi.fn();

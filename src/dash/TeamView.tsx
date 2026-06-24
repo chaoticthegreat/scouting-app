@@ -6,15 +6,32 @@
 // note when Statbotics is down — never hard-fail), and the team's scouted
 // matches. Dark theme, shadcn primitives, 44px touch targets.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Wrench, Cog, Sparkles, Inbox, Image as ImageIcon, StickyNote } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Sheet } from '@/components/ui/Sheet';
 import { cn } from '@/lib/utils';
+import { formatMatchKeyRaw } from '@/lib/formatMatch';
 import { aggregateEvent, type TeamAgg } from '@/dash/aggregate';
-import { useEventTeams, useEventReports, useEventEpa } from '@/dash/useEventData';
+import {
+  useEventTeams,
+  useEventReports,
+  useEventScouts,
+  useEventEpa,
+  useEventMatches,
+} from '@/dash/useEventData';
+import { useTeamPit, type TeamPit } from '@/dash/useTeamPit';
+import ReportDetail from '@/dash/ReportDetail';
+import { BarChart, LineChart, StackedBar } from '@/dash/charts';
 import type { MsrRow } from '@/dash/types';
 
 export interface TeamViewProps {
   eventKey: string;
+  /**
+   * Team to preselect — e.g. when arriving from a click in Ranking. Syncs the
+   * dropdown when it changes; the dropdown still drives manual selection after.
+   */
+  selectedTeam?: number | null;
 }
 
 /** Confidence below this surfaces the rate-FUEL low-confidence chip. */
@@ -48,14 +65,188 @@ function Stat(props: {
   );
 }
 
+/** A labelled row of pill chips (mechanisms / capabilities / intake sources). */
+function ChipRow(props: {
+  icon: JSX.Element;
+  label: string;
+  items: string[];
+  testid: string;
+}): JSX.Element {
+  return (
+    <div className="flex flex-col gap-1.5" data-testid={props.testid}>
+      <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-foreground [&_svg]:size-4">
+        {props.icon}
+        {props.label}
+      </span>
+      {props.items.length ? (
+        <div className="flex flex-wrap gap-1.5">
+          {props.items.map((it) => (
+            <span
+              key={it}
+              className="rounded-lg border border-border bg-muted/40 px-2.5 py-1 text-sm text-foreground"
+            >
+              {it}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <span className="text-sm text-muted-foreground">—</span>
+      )}
+    </div>
+  );
+}
+
+function PitPanel(props: { pit: TeamPit | null; isLoading: boolean }): JSX.Element {
+  const { pit, isLoading } = props;
+  return (
+    <Card className="border-border bg-card" data-testid="team-pit">
+      <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+        <Wrench className="size-5 text-brand" />
+        <CardTitle className="text-foreground">Pit Report</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div data-testid="team-pit-loading" className="text-sm text-muted-foreground">
+            Loading pit report…
+          </div>
+        ) : !pit ? (
+          <div data-testid="team-pit-empty" className="text-sm text-muted-foreground">
+            No pit report yet for this team.
+          </div>
+        ) : (
+          <div data-testid="team-pit-data" className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-foreground [&_svg]:size-4">
+                <Cog />
+                Drivetrain
+              </span>
+              <span className="text-base font-semibold text-foreground" data-testid="team-pit-drivetrain">
+                {pit.drivetrain ?? '—'}
+              </span>
+            </div>
+            <ChipRow icon={<Cog />} label="Mechanisms" items={pit.mechanisms} testid="team-pit-mechanisms" />
+            <ChipRow
+              icon={<Sparkles />}
+              label="Capabilities"
+              items={pit.capabilities}
+              testid="team-pit-capabilities"
+            />
+            <ChipRow
+              icon={<Inbox />}
+              label="Intake sources"
+              items={pit.intakeSources}
+              testid="team-pit-intake"
+            />
+            {pit.photoPath ? (
+              <div className="flex flex-col gap-1.5" data-testid="team-pit-photo">
+                <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-foreground [&_svg]:size-4">
+                  <ImageIcon />
+                  Photo
+                </span>
+                <img
+                  src={pit.photoPath}
+                  alt={`Pit robot for team ${pit.teamNumber}`}
+                  className="max-h-64 w-full rounded-xl border border-border object-contain"
+                />
+              </div>
+            ) : null}
+            {pit.notes ? (
+              <div className="flex flex-col gap-1.5" data-testid="team-pit-notes">
+                <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-foreground [&_svg]:size-4">
+                  <StickyNote />
+                  Notes
+                </span>
+                <p className="rounded-xl border border-border bg-muted/30 p-3 text-sm leading-relaxed text-foreground">
+                  {pit.notes}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Trends: data-viz over the team's scouted matches (chronological by match_key).
+ * Charts degrade to a "Not enough data to chart" state under 2 reports. Uses the
+ * dependency-free SVG chart set with design tokens (brand/energy/success/warning).
+ */
+function TeamTrends(props: { matches: MsrRow[] }): JSX.Element {
+  const { matches } = props;
+
+  // Stable chronological order so x-axis labels read left→right by match.
+  const ordered = useMemo(
+    () => matches.slice().sort((a, b) => a.match_key.localeCompare(b.match_key)),
+    [matches],
+  );
+
+  const labels = ordered.map((m) => formatMatchKeyRaw(m.match_key));
+
+  const fuelData = ordered.map((m, i) => ({ label: labels[i], value: m.fuel_points }));
+  const shiftData = ordered.map((m, i) => ({
+    label: labels[i],
+    values: Array.isArray(m.fuel_by_shift) ? m.fuel_by_shift : [],
+  }));
+  const shiftCount = Math.max(0, ...shiftData.map((d) => d.values.length));
+  const shiftNames = Array.from({ length: shiftCount }, (_, i) => `Shift ${i + 1}`);
+  const climbData = ordered.map((m, i) => ({
+    label: labels[i],
+    value: m.climb_success ? m.climb_level : 0,
+  }));
+  const defenseData = ordered.map((m, i) => ({ label: labels[i], value: m.defense_rating }));
+
+  return (
+    <Card className="border-zinc-800 bg-zinc-950" data-testid="team-trends">
+      <CardHeader className="space-y-0">
+        <CardTitle className="text-zinc-100">Trends</CardTitle>
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <BarChart
+          data={fuelData}
+          color="energy"
+          title="Fuel points per match"
+          testid="team-trend-fuel"
+        />
+        <StackedBar
+          data={shiftData}
+          seriesNames={shiftNames}
+          title="Fuel by shift"
+          testid="team-trend-shift"
+        />
+        <LineChart
+          data={climbData}
+          color="success"
+          yMax={3}
+          title="Climb level per match (success-gated)"
+          testid="team-trend-climb"
+        />
+        <LineChart
+          data={defenseData}
+          color="brand"
+          yMax={5}
+          title="Defense rating per match"
+          testid="team-trend-defense"
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
 function TeamDetail(props: {
   agg: TeamAgg;
   matches: MsrRow[];
   epaNode: JSX.Element;
+  pitNode: JSX.Element;
+  scoutName: (id: string | null | undefined) => string;
+  onOpenReport: (r: MsrRow) => void;
 }): JSX.Element {
-  const { agg, matches } = props;
+  const { agg, matches, scoutName } = props;
   const lowConfidence = agg.meanFuelConfidence < LOW_CONFIDENCE_THRESHOLD;
   const downWeight = agg.meanFuelPoints - agg.fuelPointsWeighted;
+  // Index of the expanded scouted-match row (click to reveal that report's detail).
+  const [openRow, setOpenRow] = useState<number | null>(null);
 
   return (
     <div data-testid="team-detail" className="flex flex-col gap-4">
@@ -137,13 +328,19 @@ function TeamDetail(props: {
         </CardContent>
       </Card>
 
+      {/* Trends — per-match data-viz over this team's scouted matches. */}
+      <TeamTrends matches={matches} />
+
       {/* Statbotics EPA */}
       <Card className="border-zinc-800 bg-zinc-950">
         <CardHeader className="space-y-0">
-          <CardTitle className="text-zinc-100">Statbotics EPA</CardTitle>
+          <CardTitle className="text-zinc-100">EPA</CardTitle>
         </CardHeader>
         <CardContent>{props.epaNode}</CardContent>
       </Card>
+
+      {/* Pit scouting report */}
+      {props.pitNode}
 
       {/* Scouted matches */}
       <Card className="border-zinc-800 bg-zinc-950">
@@ -154,15 +351,63 @@ function TeamDetail(props: {
           <ul data-testid="team-match-list" className="flex flex-col gap-2">
             {matches.map((m, i) => {
               const climb = m.climb_success ? `L${m.climb_level}` : 'no climb';
+              const open = openRow === i;
+              const flags = [
+                m.no_show ? 'no-show' : null,
+                m.died ? 'died' : null,
+                m.tipped ? 'tipped' : null,
+              ].filter(Boolean);
               return (
                 <li
                   key={`${m.match_key}-${i}`}
-                  className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200"
+                  className="rounded-md border border-zinc-800 bg-zinc-900/60 text-sm text-zinc-200"
                 >
-                  <span className="font-mono">{m.match_key}</span>
-                  <span className="text-zinc-400">
-                    fuel {fmt(m.fuel_points)} · {climb}
-                  </span>
+                  <button
+                    type="button"
+                    data-testid={`team-match-row-${i}`}
+                    onClick={() => setOpenRow(open ? null : i)}
+                    style={{ minHeight: CONTROL_MIN_HEIGHT }}
+                    className="flex w-full items-center justify-between px-3 py-2 text-left"
+                  >
+                    <span className="font-semibold">{formatMatchKeyRaw(m.match_key)}</span>
+                    <span className="text-zinc-400">
+                      fuel {fmt(m.fuel_points)} · {climb}
+                    </span>
+                  </button>
+                  {open ? (
+                    <div
+                      data-testid="team-match-detail"
+                      className="flex flex-col gap-2 border-t border-zinc-800 px-3 py-2 text-zinc-300"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-400">
+                          {m.alliance_color} {m.station} · scouted by {scoutName(m.scout_id)}
+                        </span>
+                        {flags.length ? (
+                          <span className="text-amber-300">{flags.join(' · ')}</span>
+                        ) : null}
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-zinc-400 sm:grid-cols-4">
+                        <span>auto {fmt(m.auto_fuel)}</span>
+                        <span>tele+ {fmt(m.teleop_fuel_active)}</span>
+                        <span>tele− {fmt(m.teleop_fuel_inactive)}</span>
+                        <span>end {fmt(m.endgame_fuel)}</span>
+                        <span>defense {m.defense_rating}</span>
+                        <span>pins {m.pins}</span>
+                      </div>
+                      {m.notes ? (
+                        <span className="text-zinc-500">“{m.notes}”</span>
+                      ) : null}
+                      <button
+                        type="button"
+                        data-testid={`team-match-fullreport-${i}`}
+                        onClick={() => props.onOpenReport(m)}
+                        className="self-start rounded-lg border border-foreground/40 bg-accent px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted"
+                      >
+                        View full report
+                      </button>
+                    </div>
+                  ) : null}
                 </li>
               );
             })}
@@ -174,15 +419,39 @@ function TeamDetail(props: {
 }
 
 export default function TeamView(props: TeamViewProps): JSX.Element {
-  const { eventKey } = props;
-  const [selected, setSelected] = useState<number | null>(null);
+  const { eventKey, selectedTeam } = props;
+  const [selected, setSelected] = useState<number | null>(selectedTeam ?? null);
+  const [openReport, setOpenReport] = useState<MsrRow | null>(null);
+
+  // Sync from the incoming prop (e.g. a click in Ranking) without clobbering
+  // manual dropdown changes: only when the prop names a real, different team.
+  useEffect(() => {
+    if (selectedTeam != null && selectedTeam !== selected) {
+      setSelected(selectedTeam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTeam]);
 
   const teamsQuery = useEventTeams(eventKey);
   const reportsQuery = useEventReports(eventKey);
+  const scoutsQuery = useEventScouts(eventKey);
+  const pitQuery = useTeamPit(eventKey, selected);
+
+  // Resolve a scout_id → display name for per-report attribution.
+  const scoutNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of scoutsQuery.data ?? []) m.set(s.id, s.display_name ?? '(unnamed)');
+    return m;
+  }, [scoutsQuery.data]);
+  const scoutName = (id: string | null | undefined): string =>
+    id ? scoutNameById.get(id) ?? '(unknown)' : 'unassigned';
 
   // EPA only for the selected team (never hard-fail on Statbotics outage).
+  // Pass the event matches so EPA can fall back to a local estimate (computed
+  // from real results) when Statbotics is offline.
   const epaTeams = useMemo(() => (selected != null ? [selected] : []), [selected]);
-  const epaQuery = useEventEpa(epaTeams, eventKey);
+  const matchesQuery = useEventMatches(eventKey);
+  const epaQuery = useEventEpa(epaTeams, eventKey, matchesQuery.data ?? []);
 
   // Aggregate the whole event once; index the selected team's TeamAgg out of it.
   const reports = reportsQuery.data ?? [];
@@ -204,10 +473,18 @@ export default function TeamView(props: TeamViewProps): JSX.Element {
   const epa = epaQuery.data;
   const epaValue = selected != null ? epa?.epaByTeam.get(selected) ?? null : null;
   const epaAvailable = epa?.available === true && epaValue != null;
+  const epaIsLocal = epa?.source === 'local';
   const epaNode = (
     <div data-testid="team-epa">
       {epaAvailable ? (
-        <span className="text-2xl font-semibold text-zinc-100">{fmt(epaValue as number)}</span>
+        <div className="flex flex-col gap-1">
+          <span className="text-2xl font-semibold text-zinc-100">{fmt(epaValue as number)}</span>
+          <span className="text-xs text-zinc-400">
+            {epaIsLocal
+              ? 'Local estimate — Statbotics offline (computed from match results).'
+              : 'Statbotics EPA (total points).'}
+          </span>
+        </div>
       ) : (
         <span className="text-sm text-zinc-400">
           EPA unavailable — Statbotics is offline or has no data for this team.
@@ -215,6 +492,8 @@ export default function TeamView(props: TeamViewProps): JSX.Element {
       )}
     </div>
   );
+
+  const pitNode = <PitPanel pit={pitQuery.data ?? null} isLoading={pitQuery.isLoading} />;
 
   return (
     <div data-testid="dash-team" className="flex flex-col gap-4 text-zinc-100">
@@ -265,18 +544,45 @@ export default function TeamView(props: TeamViewProps): JSX.Element {
               {agg.matchesScouted} match{agg.matchesScouted === 1 ? '' : 'es'} scouted
             </span>
           </div>
-          <TeamDetail agg={agg} matches={teamMatches} epaNode={epaNode} />
+          <TeamDetail
+            agg={agg}
+            matches={teamMatches}
+            epaNode={epaNode}
+            pitNode={pitNode}
+            scoutName={scoutName}
+            onOpenReport={setOpenReport}
+          />
         </div>
       ) : (
-        <div
-          data-testid="team-no-data"
-          className="rounded-md border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400"
-        >
-          No scouting reports for team {selected} at this event yet.
-          {/* EPA may still be available; show it so the team isn't a dead end. */}
-          <div className="mt-3">{epaNode}</div>
+        <div className="flex flex-col gap-4">
+          <div
+            data-testid="team-no-data"
+            className="rounded-md border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400"
+          >
+            No scouting reports for team {selected} at this event yet.
+            {/* EPA may still be available; show it so the team isn't a dead end. */}
+            <div className="mt-3">{epaNode}</div>
+          </div>
+          {/* Pit data may still exist even without match reports. */}
+          {pitNode}
         </div>
       )}
+
+      <Sheet
+        open={openReport != null}
+        onClose={() => setOpenReport(null)}
+        side="right"
+        title={
+          openReport
+            ? `${formatMatchKeyRaw(openReport.match_key)} · Team ${openReport.target_team_number}`
+            : ''
+        }
+        data-testid="team-report-sheet"
+      >
+        {openReport ? (
+          <ReportDetail report={openReport} scoutName={scoutName(openReport.scout_id)} />
+        ) : null}
+      </Sheet>
     </div>
   );
 }

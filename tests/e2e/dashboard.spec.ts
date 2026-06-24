@@ -38,17 +38,17 @@ test('lead sees a next-match prediction and builds a persisted picklist (no logi
   // Dashboard is open — no login gate.
   await page.goto('/dashboard');
   await expect(page.getByTestId('dashboard')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('dash-tab-next')).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Next Match' })).toBeVisible();
 
   // Next-match preview renders a confidence-weighted prediction. This must hold
   // whether or not Statbotics is reachable (the proxy degrades to unavailable).
-  await page.getByTestId('dash-tab-next').click();
+  await page.getByRole('tab', { name: 'Next Match' }).click();
   await expect(page.getByTestId('dash-next')).toBeVisible({ timeout: 25_000 });
   await expect(page.getByTestId('dash-next-red-score')).toBeVisible({ timeout: 25_000 });
   await expect(page.getByTestId('dash-next-red-winprob')).toBeVisible();
 
   // Picklist: add a team, save, and confirm it persisted to the server table.
-  await page.getByTestId('dash-tab-picklist').click();
+  await page.getByRole('tab', { name: 'Picklist' }).click();
   await expect(page.getByTestId('dash-picklist')).toBeVisible({ timeout: 15_000 });
   await page.getByTestId('pick-add-input').fill('254');
   await page.getByTestId('pick-add').click();

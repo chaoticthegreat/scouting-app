@@ -1,6 +1,6 @@
 // src/dash/__tests__/NextMatchView.test.tsx
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, cleanup, within } from '@testing-library/react';
+import { render, cleanup, within, fireEvent } from '@testing-library/react';
 import type { MsrRow } from '@/dash/types';
 import { OUR_TEAM } from '@/dash/constants';
 
@@ -9,13 +9,15 @@ const useEventMatchesMock = vi.fn();
 const useEventReportsMock = vi.fn();
 const useEventTeamsMock = vi.fn();
 const useEventEpaMock = vi.fn();
+const useNexusEventStatusMock = vi.fn();
 
 vi.mock('@/dash/useEventData', () => ({
   useEventMatches: (eventKey: string | null) => useEventMatchesMock(eventKey),
   useEventReports: (eventKey: string | null) => useEventReportsMock(eventKey),
   useEventTeams: (eventKey: string | null) => useEventTeamsMock(eventKey),
-  useEventEpa: (teams: number[], eventKey: string | null) =>
-    useEventEpaMock(teams, eventKey),
+  useEventEpa: (teams: number[], eventKey: string | null, matches?: unknown) =>
+    useEventEpaMock(teams, eventKey, matches),
+  useNexusEventStatus: (eventKey: string | null) => useNexusEventStatusMock(eventKey),
 }));
 
 // --- stub AutoRoutines to keep this focused on prediction rendering ---
@@ -33,6 +35,9 @@ beforeEach(() => {
   useEventReportsMock.mockReset();
   useEventTeamsMock.mockReset();
   useEventEpaMock.mockReset();
+  useNexusEventStatusMock.mockReset();
+  // Default: Nexus unavailable so the view degrades to the schedule.
+  useNexusEventStatusMock.mockReturnValue(dataResult({ status: null, available: false }));
 });
 
 /** Minimal MsrRow factory. */
@@ -254,5 +259,73 @@ describe('NextMatchView', () => {
     // 3256 row resolves to an EPA source badge (unscouted).
     const ourRow = getByTestId(`dash-next-team-${OUR_TEAM}`);
     expect(within(ourRow).getByTestId('dash-next-source-badge').textContent?.toLowerCase()).toContain('epa');
+  });
+
+  it('defaults the selector to OUR next match and lets the user view any match', () => {
+    setupHappyPath(true);
+    const { getByTestId, getAllByTestId } = render(<NextMatchView eventKey="2026evt" />);
+
+    // A match selector is present and defaults to OUR auto-picked next match (qm2).
+    const selector = getByTestId('dash-next-match-select') as HTMLSelectElement;
+    expect(selector).toBeTruthy();
+    expect(selector.value).toBe('2026evt_qm2');
+
+    // The header reflects the selected (default) match: Qual 2.
+    expect(getByTestId('dash-next-title').textContent).toMatch(/Qual 2/);
+    // OUR team's row is present for the default selection.
+    expect(getByTestId(`dash-next-team-${OUR_TEAM}`)).toBeTruthy();
+
+    // Override: pick qm3 (does NOT include 3256).
+    fireEvent.change(selector, { target: { value: '2026evt_qm3' } });
+    expect(getByTestId('dash-next-title').textContent).toMatch(/Qual 3/);
+    // qm3 teams: 777,888,999 / 666,555,444 — six team rows, no 3256.
+    const rows = getAllByTestId(/^dash-next-team-\d+$/);
+    const numbers = rows.map((r) => r.getAttribute('data-testid'));
+    expect(numbers).toContain('dash-next-team-777');
+    expect(numbers).not.toContain(`dash-next-team-${OUR_TEAM}`);
+  });
+
+  it('shows a live indicator and Nexus-fed upcoming list when Nexus is available', () => {
+    setupHappyPath(true);
+    useNexusEventStatusMock.mockReturnValue(
+      dataResult({
+        available: true,
+        status: {
+          eventKey: '2026evt',
+          dataAsOfTime: 1,
+          nowQueuing: 'Qualification 2',
+          onField: {
+            label: 'Qualification 1',
+            status: 'On field',
+            redTeams: [OUR_TEAM, 111, 222],
+            blueTeams: [333, 444, 555],
+            times: { estimatedStartTime: null, estimatedQueueTime: null, estimatedOnDeckTime: null, estimatedOnFieldTime: null, actualQueueTime: null },
+          },
+          queuing: {
+            label: 'Qualification 2',
+            status: 'Now queuing',
+            redTeams: [OUR_TEAM, 111, 222],
+            blueTeams: [333, 444, 555],
+            times: { estimatedStartTime: null, estimatedQueueTime: null, estimatedOnDeckTime: null, estimatedOnFieldTime: null, actualQueueTime: null },
+          },
+          matches: [],
+          upcoming: [
+            {
+              label: 'Qualification 2',
+              status: 'Now queuing',
+              redTeams: [OUR_TEAM, 111, 222],
+              blueTeams: [333, 444, 555],
+              times: { estimatedStartTime: null, estimatedQueueTime: null, estimatedOnDeckTime: null, estimatedOnFieldTime: null, actualQueueTime: null },
+            },
+          ],
+        },
+      }),
+    );
+
+    const { getAllByTestId, getByTestId } = render(<NextMatchView eventKey="2026evt" />);
+    // Live badge present (hero + upcoming).
+    expect(getAllByTestId('dash-next-live').length).toBeGreaterThan(0);
+    // Nexus-fed upcoming list rendered.
+    expect(getByTestId('dash-next-upcoming')).toBeTruthy();
   });
 });

@@ -15,6 +15,15 @@ export interface FuelBurst {
   window: MatchWindow;
 }
 
+// A timestamped activity interval (defense played / being defended), recorded in
+// phase-elapsed ms with the phase it occurred in, so a per-match timeline can be
+// reconstructed on the dashboard. Mirrors the FuelBurst persistence pattern.
+export interface TimeInterval {
+  startMs: number;
+  endMs: number;
+  phase: 'auto' | 'teleop';
+}
+
 export interface MatchReportInputs {
   schemaVersion: number;
   inactiveFirst: boolean;

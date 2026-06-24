@@ -1,0 +1,329 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - heading "Dashboard" [level=1] [ref=e5]
+    - generic [ref=e6]: 2026casnv
+  - tablist "Dashboard sections" [ref=e7]:
+    - tab "Next Match" [ref=e8] [cursor=pointer]:
+      - img [ref=e9]
+      - generic [ref=e18]: Next Match
+    - tab "Team" [ref=e19] [cursor=pointer]:
+      - img [ref=e20]
+      - generic [ref=e25]: Team
+    - tab "Scouters" [ref=e26] [cursor=pointer]:
+      - img [ref=e27]
+      - generic [ref=e31]: Scouters
+    - tab "Match" [active] [selected] [ref=e32] [cursor=pointer]:
+      - img [ref=e33]
+      - generic [ref=e35]: Match
+    - tab "Ranking" [ref=e36] [cursor=pointer]:
+      - img [ref=e37]
+      - generic [ref=e40]: Ranking
+    - tab "Picklist" [ref=e41] [cursor=pointer]:
+      - img [ref=e42]
+      - generic [ref=e45]: Picklist
+    - tab "Setup" [ref=e46] [cursor=pointer]:
+      - img [ref=e47]
+      - generic [ref=e50]: Setup
+  - generic [ref=e257]:
+    - generic [ref=e258]:
+      - generic [ref=e259]:
+        - img [ref=e260]
+        - generic [ref=e262]: Matches (74)
+      - list [ref=e264]:
+        - listitem [ref=e265]:
+          - button "Qual 1 1 report" [ref=e266] [cursor=pointer]:
+            - generic [ref=e267]: Qual 1
+            - generic [ref=e268]: 1 report
+        - listitem [ref=e269]:
+          - button "Qual 2 0 reports" [ref=e270] [cursor=pointer]:
+            - generic [ref=e271]: Qual 2
+            - generic [ref=e272]: 0 reports
+        - listitem [ref=e273]:
+          - button "Qual 3 2 reports" [ref=e274] [cursor=pointer]:
+            - generic [ref=e275]: Qual 3
+            - generic [ref=e276]: 2 reports
+        - listitem [ref=e277]:
+          - button "Qual 4 0 reports" [ref=e278] [cursor=pointer]:
+            - generic [ref=e279]: Qual 4
+            - generic [ref=e280]: 0 reports
+        - listitem [ref=e281]:
+          - button "Qual 5 0 reports" [ref=e282] [cursor=pointer]:
+            - generic [ref=e283]: Qual 5
+            - generic [ref=e284]: 0 reports
+        - listitem [ref=e285]:
+          - button "Qual 6 0 reports" [ref=e286] [cursor=pointer]:
+            - generic [ref=e287]: Qual 6
+            - generic [ref=e288]: 0 reports
+        - listitem [ref=e289]:
+          - button "Qual 7 0 reports" [ref=e290] [cursor=pointer]:
+            - generic [ref=e291]: Qual 7
+            - generic [ref=e292]: 0 reports
+        - listitem [ref=e293]:
+          - button "Qual 8 0 reports" [ref=e294] [cursor=pointer]:
+            - generic [ref=e295]: Qual 8
+            - generic [ref=e296]: 0 reports
+        - listitem [ref=e297]:
+          - button "Qual 9 0 reports" [ref=e298] [cursor=pointer]:
+            - generic [ref=e299]: Qual 9
+            - generic [ref=e300]: 0 reports
+        - listitem [ref=e301]:
+          - button "Qual 10 0 reports" [ref=e302] [cursor=pointer]:
+            - generic [ref=e303]: Qual 10
+            - generic [ref=e304]: 0 reports
+        - listitem [ref=e305]:
+          - button "Qual 11 0 reports" [ref=e306] [cursor=pointer]:
+            - generic [ref=e307]: Qual 11
+            - generic [ref=e308]: 0 reports
+        - listitem [ref=e309]:
+          - button "Qual 12 0 reports" [ref=e310] [cursor=pointer]:
+            - generic [ref=e311]: Qual 12
+            - generic [ref=e312]: 0 reports
+        - listitem [ref=e313]:
+          - button "Qual 13 0 reports" [ref=e314] [cursor=pointer]:
+            - generic [ref=e315]: Qual 13
+            - generic [ref=e316]: 0 reports
+        - listitem [ref=e317]:
+          - button "Qual 14 0 reports" [ref=e318] [cursor=pointer]:
+            - generic [ref=e319]: Qual 14
+            - generic [ref=e320]: 0 reports
+        - listitem [ref=e321]:
+          - button "Qual 15 0 reports" [ref=e322] [cursor=pointer]:
+            - generic [ref=e323]: Qual 15
+            - generic [ref=e324]: 0 reports
+        - listitem [ref=e325]:
+          - button "Qual 16 0 reports" [ref=e326] [cursor=pointer]:
+            - generic [ref=e327]: Qual 16
+            - generic [ref=e328]: 0 reports
+        - listitem [ref=e329]:
+          - button "Qual 17 0 reports" [ref=e330] [cursor=pointer]:
+            - generic [ref=e331]: Qual 17
+            - generic [ref=e332]: 0 reports
+        - listitem [ref=e333]:
+          - button "Qual 18 0 reports" [ref=e334] [cursor=pointer]:
+            - generic [ref=e335]: Qual 18
+            - generic [ref=e336]: 0 reports
+        - listitem [ref=e337]:
+          - button "Qual 19 0 reports" [ref=e338] [cursor=pointer]:
+            - generic [ref=e339]: Qual 19
+            - generic [ref=e340]: 0 reports
+        - listitem [ref=e341]:
+          - button "Qual 20 0 reports" [ref=e342] [cursor=pointer]:
+            - generic [ref=e343]: Qual 20
+            - generic [ref=e344]: 0 reports
+        - listitem [ref=e345]:
+          - button "Qual 21 0 reports" [ref=e346] [cursor=pointer]:
+            - generic [ref=e347]: Qual 21
+            - generic [ref=e348]: 0 reports
+        - listitem [ref=e349]:
+          - button "Qual 22 0 reports" [ref=e350] [cursor=pointer]:
+            - generic [ref=e351]: Qual 22
+            - generic [ref=e352]: 0 reports
+        - listitem [ref=e353]:
+          - button "Qual 23 0 reports" [ref=e354] [cursor=pointer]:
+            - generic [ref=e355]: Qual 23
+            - generic [ref=e356]: 0 reports
+        - listitem [ref=e357]:
+          - button "Qual 24 0 reports" [ref=e358] [cursor=pointer]:
+            - generic [ref=e359]: Qual 24
+            - generic [ref=e360]: 0 reports
+        - listitem [ref=e361]:
+          - button "Qual 25 0 reports" [ref=e362] [cursor=pointer]:
+            - generic [ref=e363]: Qual 25
+            - generic [ref=e364]: 0 reports
+        - listitem [ref=e365]:
+          - button "Qual 26 0 reports" [ref=e366] [cursor=pointer]:
+            - generic [ref=e367]: Qual 26
+            - generic [ref=e368]: 0 reports
+        - listitem [ref=e369]:
+          - button "Qual 27 0 reports" [ref=e370] [cursor=pointer]:
+            - generic [ref=e371]: Qual 27
+            - generic [ref=e372]: 0 reports
+        - listitem [ref=e373]:
+          - button "Qual 28 0 reports" [ref=e374] [cursor=pointer]:
+            - generic [ref=e375]: Qual 28
+            - generic [ref=e376]: 0 reports
+        - listitem [ref=e377]:
+          - button "Qual 29 0 reports" [ref=e378] [cursor=pointer]:
+            - generic [ref=e379]: Qual 29
+            - generic [ref=e380]: 0 reports
+        - listitem [ref=e381]:
+          - button "Qual 30 0 reports" [ref=e382] [cursor=pointer]:
+            - generic [ref=e383]: Qual 30
+            - generic [ref=e384]: 0 reports
+        - listitem [ref=e385]:
+          - button "Qual 31 0 reports" [ref=e386] [cursor=pointer]:
+            - generic [ref=e387]: Qual 31
+            - generic [ref=e388]: 0 reports
+        - listitem [ref=e389]:
+          - button "Qual 32 0 reports" [ref=e390] [cursor=pointer]:
+            - generic [ref=e391]: Qual 32
+            - generic [ref=e392]: 0 reports
+        - listitem [ref=e393]:
+          - button "Qual 33 0 reports" [ref=e394] [cursor=pointer]:
+            - generic [ref=e395]: Qual 33
+            - generic [ref=e396]: 0 reports
+        - listitem [ref=e397]:
+          - button "Qual 34 0 reports" [ref=e398] [cursor=pointer]:
+            - generic [ref=e399]: Qual 34
+            - generic [ref=e400]: 0 reports
+        - listitem [ref=e401]:
+          - button "Qual 35 0 reports" [ref=e402] [cursor=pointer]:
+            - generic [ref=e403]: Qual 35
+            - generic [ref=e404]: 0 reports
+        - listitem [ref=e405]:
+          - button "Qual 36 0 reports" [ref=e406] [cursor=pointer]:
+            - generic [ref=e407]: Qual 36
+            - generic [ref=e408]: 0 reports
+        - listitem [ref=e409]:
+          - button "Qual 37 0 reports" [ref=e410] [cursor=pointer]:
+            - generic [ref=e411]: Qual 37
+            - generic [ref=e412]: 0 reports
+        - listitem [ref=e413]:
+          - button "Qual 38 0 reports" [ref=e414] [cursor=pointer]:
+            - generic [ref=e415]: Qual 38
+            - generic [ref=e416]: 0 reports
+        - listitem [ref=e417]:
+          - button "Qual 39 0 reports" [ref=e418] [cursor=pointer]:
+            - generic [ref=e419]: Qual 39
+            - generic [ref=e420]: 0 reports
+        - listitem [ref=e421]:
+          - button "Qual 40 0 reports" [ref=e422] [cursor=pointer]:
+            - generic [ref=e423]: Qual 40
+            - generic [ref=e424]: 0 reports
+        - listitem [ref=e425]:
+          - button "Qual 41 0 reports" [ref=e426] [cursor=pointer]:
+            - generic [ref=e427]: Qual 41
+            - generic [ref=e428]: 0 reports
+        - listitem [ref=e429]:
+          - button "Qual 42 0 reports" [ref=e430] [cursor=pointer]:
+            - generic [ref=e431]: Qual 42
+            - generic [ref=e432]: 0 reports
+        - listitem [ref=e433]:
+          - button "Qual 43 0 reports" [ref=e434] [cursor=pointer]:
+            - generic [ref=e435]: Qual 43
+            - generic [ref=e436]: 0 reports
+        - listitem [ref=e437]:
+          - button "Qual 44 0 reports" [ref=e438] [cursor=pointer]:
+            - generic [ref=e439]: Qual 44
+            - generic [ref=e440]: 0 reports
+        - listitem [ref=e441]:
+          - button "Qual 45 0 reports" [ref=e442] [cursor=pointer]:
+            - generic [ref=e443]: Qual 45
+            - generic [ref=e444]: 0 reports
+        - listitem [ref=e445]:
+          - button "Qual 46 0 reports" [ref=e446] [cursor=pointer]:
+            - generic [ref=e447]: Qual 46
+            - generic [ref=e448]: 0 reports
+        - listitem [ref=e449]:
+          - button "Qual 47 0 reports" [ref=e450] [cursor=pointer]:
+            - generic [ref=e451]: Qual 47
+            - generic [ref=e452]: 0 reports
+        - listitem [ref=e453]:
+          - button "Qual 48 0 reports" [ref=e454] [cursor=pointer]:
+            - generic [ref=e455]: Qual 48
+            - generic [ref=e456]: 0 reports
+        - listitem [ref=e457]:
+          - button "Qual 49 0 reports" [ref=e458] [cursor=pointer]:
+            - generic [ref=e459]: Qual 49
+            - generic [ref=e460]: 0 reports
+        - listitem [ref=e461]:
+          - button "Qual 50 0 reports" [ref=e462] [cursor=pointer]:
+            - generic [ref=e463]: Qual 50
+            - generic [ref=e464]: 0 reports
+        - listitem [ref=e465]:
+          - button "Qual 51 0 reports" [ref=e466] [cursor=pointer]:
+            - generic [ref=e467]: Qual 51
+            - generic [ref=e468]: 0 reports
+        - listitem [ref=e469]:
+          - button "Qual 52 0 reports" [ref=e470] [cursor=pointer]:
+            - generic [ref=e471]: Qual 52
+            - generic [ref=e472]: 0 reports
+        - listitem [ref=e473]:
+          - button "Qual 53 0 reports" [ref=e474] [cursor=pointer]:
+            - generic [ref=e475]: Qual 53
+            - generic [ref=e476]: 0 reports
+        - listitem [ref=e477]:
+          - button "Qual 54 0 reports" [ref=e478] [cursor=pointer]:
+            - generic [ref=e479]: Qual 54
+            - generic [ref=e480]: 0 reports
+        - listitem [ref=e481]:
+          - button "Qual 55 0 reports" [ref=e482] [cursor=pointer]:
+            - generic [ref=e483]: Qual 55
+            - generic [ref=e484]: 0 reports
+        - listitem [ref=e485]:
+          - button "Qual 56 0 reports" [ref=e486] [cursor=pointer]:
+            - generic [ref=e487]: Qual 56
+            - generic [ref=e488]: 0 reports
+        - listitem [ref=e489]:
+          - button "Qual 57 0 reports" [ref=e490] [cursor=pointer]:
+            - generic [ref=e491]: Qual 57
+            - generic [ref=e492]: 0 reports
+        - listitem [ref=e493]:
+          - button "Qual 58 0 reports" [ref=e494] [cursor=pointer]:
+            - generic [ref=e495]: Qual 58
+            - generic [ref=e496]: 0 reports
+        - listitem [ref=e497]:
+          - button "Qual 59 0 reports" [ref=e498] [cursor=pointer]:
+            - generic [ref=e499]: Qual 59
+            - generic [ref=e500]: 0 reports
+        - listitem [ref=e501]:
+          - button "Qual 60 0 reports" [ref=e502] [cursor=pointer]:
+            - generic [ref=e503]: Qual 60
+            - generic [ref=e504]: 0 reports
+        - listitem [ref=e505]:
+          - button "Qual 61 0 reports" [ref=e506] [cursor=pointer]:
+            - generic [ref=e507]: Qual 61
+            - generic [ref=e508]: 0 reports
+        - listitem [ref=e509]:
+          - button "Qual 62 0 reports" [ref=e510] [cursor=pointer]:
+            - generic [ref=e511]: Qual 62
+            - generic [ref=e512]: 0 reports
+        - listitem [ref=e513]:
+          - button "Qual 63 0 reports" [ref=e514] [cursor=pointer]:
+            - generic [ref=e515]: Qual 63
+            - generic [ref=e516]: 0 reports
+        - listitem [ref=e517]:
+          - button "Qual 64 0 reports" [ref=e518] [cursor=pointer]:
+            - generic [ref=e519]: Qual 64
+            - generic [ref=e520]: 0 reports
+        - listitem [ref=e521]:
+          - button "Qual 65 0 reports" [ref=e522] [cursor=pointer]:
+            - generic [ref=e523]: Qual 65
+            - generic [ref=e524]: 0 reports
+        - listitem [ref=e525]:
+          - button "Qual 66 0 reports" [ref=e526] [cursor=pointer]:
+            - generic [ref=e527]: Qual 66
+            - generic [ref=e528]: 0 reports
+        - listitem [ref=e529]:
+          - button "Qual 67 0 reports" [ref=e530] [cursor=pointer]:
+            - generic [ref=e531]: Qual 67
+            - generic [ref=e532]: 0 reports
+        - listitem [ref=e533]:
+          - button "Qual 68 0 reports" [ref=e534] [cursor=pointer]:
+            - generic [ref=e535]: Qual 68
+            - generic [ref=e536]: 0 reports
+        - listitem [ref=e537]:
+          - button "Qual 69 0 reports" [ref=e538] [cursor=pointer]:
+            - generic [ref=e539]: Qual 69
+            - generic [ref=e540]: 0 reports
+        - listitem [ref=e541]:
+          - button "Qual 70 0 reports" [ref=e542] [cursor=pointer]:
+            - generic [ref=e543]: Qual 70
+            - generic [ref=e544]: 0 reports
+        - listitem [ref=e545]:
+          - button "Qual 71 0 reports" [ref=e546] [cursor=pointer]:
+            - generic [ref=e547]: Qual 71
+            - generic [ref=e548]: 0 reports
+        - listitem [ref=e549]:
+          - button "Qual 72 0 reports" [ref=e550] [cursor=pointer]:
+            - generic [ref=e551]: Qual 72
+            - generic [ref=e552]: 0 reports
+        - listitem [ref=e553]:
+          - button "Qual 73 0 reports" [ref=e554] [cursor=pointer]:
+            - generic [ref=e555]: Qual 73
+            - generic [ref=e556]: 0 reports
+        - listitem [ref=e557]:
+          - button "Qual 74 0 reports" [ref=e558] [cursor=pointer]:
+            - generic [ref=e559]: Qual 74
+            - generic [ref=e560]: 0 reports
+    - generic [ref=e561]: Pick a match to compare every report on it.

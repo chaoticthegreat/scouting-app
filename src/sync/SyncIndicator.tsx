@@ -30,7 +30,7 @@ export function SyncIndicator(): JSX.Element {
   return (
     <div
       data-testid="sync-indicator"
-      className="flex items-center gap-2 text-sm text-muted-foreground"
+      className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"
     >
       <span
         aria-label={online ? 'online' : 'offline'}

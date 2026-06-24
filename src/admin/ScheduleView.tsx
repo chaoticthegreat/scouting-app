@@ -56,7 +56,7 @@ export function ScheduleView({ eventKey }: ScheduleViewProps): JSX.Element {
               <li
                 key={m.match_key}
                 data-testid="schedule-row"
-                className="flex items-center gap-3 rounded-lg border p-3 text-sm"
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border p-3 text-sm"
               >
                 <span className="w-10 shrink-0 font-semibold">Q{m.match_number}</span>
                 <span className="flex gap-1 font-mono text-red-400">

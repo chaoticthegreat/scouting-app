@@ -296,11 +296,11 @@ export default function ScoutHome() {
       className="flex min-h-screen flex-col gap-6 bg-background p-4 text-foreground"
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <UserRound className="size-6" />
-          <h1 className="text-2xl font-bold">{effective.display_name || 'Scout'}</h1>
+        <div className="flex min-w-0 items-center gap-2">
+          <UserRound className="size-6 shrink-0" />
+          <h1 className="truncate text-2xl font-bold">{effective.display_name || 'Scout'}</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <SyncIndicator />
           <a
             data-testid="nav-my-data"

@@ -125,9 +125,9 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
   return (
     <div data-testid="dash-picklist" className="space-y-4 text-foreground">
       <Card className="bg-card">
-        <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
           <CardTitle>Picklist</CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {saved ? (
               <span data-testid="pick-saved" className="text-xs text-emerald-400">
                 Saved

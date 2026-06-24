@@ -174,18 +174,20 @@ export default function SetupTab(): JSX.Element {
                     disabled={isActive}
                     onClick={() => void makeActive(ev.event_key)}
                   >
-                    <span className="flex flex-col items-start text-left">
+                    <span className="flex min-w-0 flex-1 flex-col items-start text-left">
                       <span className="font-mono font-semibold">{ev.event_key}</span>
                       {ev.name ? (
-                        <span className="text-xs font-normal opacity-80">{ev.name}</span>
+                        <span className="w-full truncate text-xs font-normal opacity-80">
+                          {ev.name}
+                        </span>
                       ) : null}
                     </span>
                     {isActive ? (
-                      <span className="inline-flex items-center gap-1 text-xs">
+                      <span className="inline-flex shrink-0 items-center gap-1 text-xs">
                         <CheckCircle2 className="size-4" /> Active
                       </span>
                     ) : (
-                      <span className="text-xs opacity-70">Set active</span>
+                      <span className="shrink-0 text-xs opacity-70">Set active</span>
                     )}
                   </Button>
                 </li>

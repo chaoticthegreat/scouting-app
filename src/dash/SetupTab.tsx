@@ -3,7 +3,7 @@
 // built around, and assign scouters. Folds the old /admin page in.
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Users } from 'lucide-react';
+import { CheckCircle2, Users, ArrowLeftRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,11 +35,18 @@ interface ScoutRow {
   display_name: string;
 }
 
+interface EventOption {
+  event_key: string;
+  name: string | null;
+  is_active: boolean;
+}
+
 export default function SetupTab(): JSX.Element {
   const queryClient = useQueryClient();
   const { eventKey: activeEvent } = useActiveEvent();
   const [matches, setMatches] = useState<AssignMatch[]>([]);
   const [scouts, setScouts] = useState<AssignScout[]>([]);
+  const [events, setEvents] = useState<EventOption[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Base team: the team the whole dashboard pivots on (next match, live data,
@@ -94,16 +101,32 @@ export default function SetupTab(): JSX.Element {
     if (activeEvent) void loadEventData(activeEvent);
   }, [activeEvent, loadEventData]);
 
+  // All already-imported events, so the lead can switch the active one WITHOUT
+  // re-importing (re-import is admin-gated; switching only flips is_active, which
+  // the open `event_update_open` RLS policy permits for anon).
+  const loadEvents = useCallback(async () => {
+    const { data } = await supabase
+      .from('event')
+      .select('event_key,name,is_active')
+      .order('event_key', { ascending: true });
+    setEvents((data as EventOption[] | null) ?? []);
+  }, []);
+
+  useEffect(() => {
+    void loadEvents();
+  }, [loadEvents, activeEvent]);
+
   const makeActive = useCallback(
     async (key: string) => {
       setError(null);
       try {
         await setActiveEvent(key, queryClient);
+        await loadEvents();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to set active event.');
       }
     },
-    [queryClient],
+    [queryClient, loadEvents],
   );
 
   return (
@@ -120,8 +143,57 @@ export default function SetupTab(): JSX.Element {
         </div>
         <p className="text-xs text-muted-foreground">
           Importing an event makes it active and keeps it active across sessions and
-          devices. Import another event below to switch.
+          devices. Switch between already-imported events below — no re-import needed.
         </p>
+      </div>
+
+      {/* Switch the active event among already-imported ones (no re-import). */}
+      <div
+        data-testid="setup-events"
+        className="flex flex-col gap-2 rounded-lg border border-border p-3"
+      >
+        <div className="flex items-center gap-2">
+          <ArrowLeftRight className="size-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Switch event</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Pick any imported event to make it active. Importing a brand-new event (below)
+          still requires a lead/admin.
+        </p>
+        {events.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No events imported yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {events.map((ev) => {
+              const isActive = ev.event_key === activeEvent;
+              return (
+                <li key={ev.event_key}>
+                  <Button
+                    data-testid={`setup-switch-${ev.event_key}`}
+                    variant={isActive ? 'default' : 'outline'}
+                    className="h-auto w-full justify-between py-2"
+                    disabled={isActive}
+                    onClick={() => void makeActive(ev.event_key)}
+                  >
+                    <span className="flex flex-col items-start text-left">
+                      <span className="font-mono font-semibold">{ev.event_key}</span>
+                      {ev.name ? (
+                        <span className="text-xs font-normal opacity-80">{ev.name}</span>
+                      ) : null}
+                    </span>
+                    {isActive ? (
+                      <span className="inline-flex items-center gap-1 text-xs">
+                        <CheckCircle2 className="size-4" /> Active
+                      </span>
+                    ) : (
+                      <span className="text-xs opacity-70">Set active</span>
+                    )}
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       {/* Base team — pivots the whole dashboard (Next Match, live data, rankings). */}

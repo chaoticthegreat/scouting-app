@@ -6,9 +6,11 @@
 // breakdown (alliance expected points, win prob, source badges, auto routines)
 // stays below. Pure/injectable: the active event is passed via props.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { useFullscreen } from '@/dash/useFullscreen';
 import {
   useEventMatches,
   useEventReports,
@@ -385,6 +387,9 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
   // The base/"our" team — configurable in Setup so the whole view can pivot onto
   // another team for testing events 3256 isn't registered at. Defaults to 3256.
   const baseTeam = getStoredBaseTeam();
+  // Fullscreen the broadcast view for a kiosk/display (driver station, pit TV).
+  const containerRef = useRef<HTMLDivElement>(null);
+  const fullscreen = useFullscreen(containerRef);
   const matchesQ = useEventMatches(eventKey);
   const reportsQ = useEventReports(eventKey);
   const teamsQ = useEventTeams(eventKey);
@@ -534,8 +539,15 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
           }));
 
   return (
-    <div data-testid="dash-next" className="flex flex-col gap-4 text-foreground">
-      {/* Top bar: event name (left) · base team + event key (right). */}
+    <div
+      ref={containerRef}
+      data-testid="dash-next"
+      className={cn(
+        'flex flex-col gap-4 text-foreground',
+        fullscreen.isFullscreen && 'h-screen w-screen overflow-y-auto bg-background p-6',
+      )}
+    >
+      {/* Top bar: event name (left) · base team + key + fullscreen (right). */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-black/30 px-4 py-3">
         <h2
           data-testid="dash-next-event-title"
@@ -543,9 +555,27 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
         >
           {eventInfo.name ?? eventKey}
         </h2>
-        <span className="text-lg font-semibold text-muted-foreground">
-          <span className="text-foreground">{baseTeam}</span> | {eventKey}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-lg font-semibold text-muted-foreground">
+            <span className="text-foreground">{baseTeam}</span> | {eventKey}
+          </span>
+          {fullscreen.supported ? (
+            <button
+              type="button"
+              data-testid="dash-next-fullscreen"
+              onClick={fullscreen.toggle}
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-md border border-border bg-card/60 px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent"
+              aria-label={fullscreen.isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            >
+              {fullscreen.isFullscreen ? (
+                <Minimize2 className="size-4" />
+              ) : (
+                <Maximize2 className="size-4" />
+              )}
+              {fullscreen.isFullscreen ? 'Exit' : 'Fullscreen'}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* Broadcast grid (no leaderboard): LEFT = livestream + event/season

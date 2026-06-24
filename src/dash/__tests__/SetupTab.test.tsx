@@ -23,11 +23,19 @@ vi.mock('@/admin/EventSetup', () => ({
 vi.mock('@/admin/ScheduleView', () => ({ ScheduleView: () => <div data-testid="schedule-stub" /> }));
 vi.mock('@/admin/AssignmentBoard', () => ({ AssignmentBoard: () => <div data-testid="assign-stub" /> }));
 
+const EVENTS = [
+  { event_key: '2026casnv', name: 'Silicon Valley', is_active: true },
+  { event_key: '2026caetb', name: 'East Bay', is_active: false },
+];
 vi.mock('@/lib/supabase', () => ({
   supabase: {
-    from: () => ({
+    from: (table: string) => ({
       select: () => ({
+        // loadEventData: match/scout queries (select -> eq [-> order]).
         eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }),
+        // loadEvents: event query (select -> order), returns the imported events.
+        order: () =>
+          Promise.resolve({ data: table === 'event' ? EVENTS : [], error: null }),
       }),
     }),
   },
@@ -69,6 +77,16 @@ describe('SetupTab', () => {
     render(<SetupTab />, { wrapper });
     fireEvent.click(screen.getByTestId('import-stub'));
     await waitFor(() => expect(setActiveEventMock).toHaveBeenCalledWith('2026new', expect.anything()));
+  });
+
+  it('switches to an already-imported event without re-importing', async () => {
+    render(<SetupTab />, { wrapper });
+    // The picker lists imported events; switching only flips is_active.
+    const btn = await screen.findByTestId('setup-switch-2026caetb');
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(setActiveEventMock).toHaveBeenCalledWith('2026caetb', expect.anything()),
+    );
   });
 
   it('defaults the base team to 3256', () => {

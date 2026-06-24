@@ -16,6 +16,7 @@ import { ReviewScreen } from '@/capture/ReviewScreen';
 import { useCaptureSession, type CaptureTarget } from '@/capture/useCaptureSession';
 import { exportUnsyncedToFile } from '@/export/exportReports';
 import { SyncIndicator } from '@/sync/SyncIndicator';
+import { InstallPrompt } from '@/pwa/InstallPrompt';
 import { getStoredActiveEvent } from '@/dash/activeEventStore';
 import { listRoster, type RosterScouter } from '@/roster/rosterClient';
 import { selectScouter, forgetScouterName } from '@/roster/selectScouter';
@@ -215,6 +216,7 @@ export default function ScoutHome() {
           <h1 className="text-2xl font-bold">Scout</h1>
           <SyncIndicator />
         </header>
+        <InstallPrompt />
         {!activeEvent ? (
           <p data-testid="scout-no-event" className="text-muted-foreground">
             No active event yet. Ask your scouting lead to set the active event.
@@ -339,6 +341,8 @@ export default function ScoutHome() {
           )}
         </div>
       </header>
+
+      <InstallPrompt />
 
       <nav className="flex flex-wrap gap-3">
         <a

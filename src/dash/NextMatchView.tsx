@@ -6,10 +6,8 @@
 // breakdown (alliance expected points, win prob, source badges, auto routines)
 // stays below. Pure/injectable: the active event is passed via props.
 
-import { useMemo, useState, type ReactNode } from 'react';
-import { Radio, Clock, Trophy, Flag } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { StatTile } from '@/components/ui/StatTile';
 import { cn } from '@/lib/utils';
 import {
   useEventMatches,
@@ -162,16 +160,53 @@ function LiveBadge() {
   );
 }
 
-/** Small team-number chip in alliance colors. */
-function TeamChip({ team, color }: { team: number; color: 'red' | 'blue' }) {
+/** Compress a match label to broadcast form: "Qualification 15"/"Qual 15" → "Q15". */
+function shortMatchLabel(label: string): string {
+  const m = /(\d+)\s*$/.exec(label);
+  const num = m ? m[1] : '';
+  const lower = label.toLowerCase();
+  if (lower.startsWith('q')) return `Q${num}`;
+  if (lower.startsWith('sf') || lower.startsWith('semi')) return `SF${num}`;
+  if (lower.startsWith('f') || lower.startsWith('final')) return `F${num}`;
+  if (lower.startsWith('qf') || lower.startsWith('quarter')) return `QF${num}`;
+  const first = label.trim().charAt(0).toUpperCase();
+  return num ? `${first}${num}` : label;
+}
+
+/** Weekday + short time, e.g. "Wed 2:24 AM", for a unix-ms timestamp. */
+function dayTimeMs(ms: number | null): string | null {
+  if (ms == null) return null;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+/** Weekday + short time for an ISO string. */
+function dayTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+/** One team cell in an upcoming match's 2×3 alliance grid (broadcast style). */
+function TeamCell({
+  team,
+  color,
+  mine,
+}: {
+  team: number | null;
+  color: 'red' | 'blue';
+  mine: boolean;
+}) {
   return (
     <span
       className={cn(
-        'rounded px-1.5 py-0.5 font-mono text-xs',
-        color === 'red' ? 'bg-red-500/15 text-red-400' : 'bg-blue-500/15 text-blue-400',
+        'px-2 py-1.5 text-center font-mono text-sm font-semibold tabular-nums',
+        color === 'red' ? 'bg-red-950/80 text-red-100' : 'bg-blue-950/80 text-blue-100',
+        mine && 'bg-amber-400 text-neutral-900',
       )}
     >
-      {team}
+      {team ?? ''}
     </span>
   );
 }
@@ -297,41 +332,52 @@ function nexusMatchFor(status: NexusEventStatus | null, m: MatchRow | null): Nex
 }
 
 /** A compact live-status tile (On Field / Queuing) fed by Nexus. */
-function StatusTile({
+function FieldTile({
   label,
   match,
-  icon,
   tone,
 }: {
   label: string;
   match: NexusMatch | null;
-  icon: ReactNode;
-  tone: 'brand' | 'energy';
+  tone: 'gray' | 'yellow';
 }) {
-  const time = match ? shortTimeMs(match.times.estimatedStartTime) : null;
+  const bg = tone === 'gray' ? 'bg-neutral-200' : 'bg-amber-400';
   return (
-    <StatTile
-      label={label}
-      tone={tone}
-      icon={icon}
-      value={match ? match.label : '—'}
-      sub={
-        match ? (
-          <span className="flex flex-wrap items-center gap-1">
-            {match.redTeams.map((t) => (
-              <TeamChip key={`r${t}`} team={t} color="red" />
-            ))}
-            <span className="px-0.5 text-[10px] uppercase text-muted-foreground">vs</span>
-            {match.blueTeams.map((t) => (
-              <TeamChip key={`b${t}`} team={t} color="blue" />
-            ))}
-            {time ? <span className="ml-1 text-muted-foreground">· {time}</span> : null}
-          </span>
-        ) : (
-          'No live data'
-        )
-      }
-    />
+    <div className={cn('rounded-xl px-4 py-3 text-neutral-900', bg)}>
+      <div className="text-sm font-semibold opacity-80">{label}</div>
+      <div className="mt-1 text-4xl font-black leading-none tracking-tight">
+        {match ? shortMatchLabel(match.label) : '—'}
+      </div>
+    </div>
+  );
+}
+
+/** One upcoming match: label + time header, then a 2×3 alliance team grid. */
+interface UpcomingItem {
+  key: string;
+  label: string;
+  red: number[];
+  blue: number[];
+  time: string | null;
+  isOurs: boolean;
+}
+function UpcomingCard({ u, baseTeam }: { u: UpcomingItem; baseTeam: number }) {
+  const idx = [0, 1, 2];
+  return (
+    <li className="overflow-hidden rounded-lg border-l-4 border-red-500 bg-card/60">
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+        <span className="font-bold text-foreground">{shortMatchLabel(u.label)}</span>
+        {u.time ? <span className="text-xs text-muted-foreground">{u.time}</span> : null}
+      </div>
+      <div className="grid grid-cols-3 gap-px bg-border/30 p-px">
+        {idx.map((i) => (
+          <TeamCell key={`r${i}`} team={u.red[i] ?? null} color="red" mine={u.red[i] === baseTeam} />
+        ))}
+        {idx.map((i) => (
+          <TeamCell key={`b${i}`} team={u.blue[i] ?? null} color="blue" mine={u.blue[i] === baseTeam} />
+        ))}
+      </div>
+    </li>
   );
 }
 
@@ -435,16 +481,25 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
   });
 
   const ourAllianceIsRed = redTeams.includes(baseTeam);
-  const ourSide: 'red' | 'blue' = ourAllianceIsRed ? 'red' : 'blue';
   const redReports = reports.filter((r) => redTeams.includes(r.target_team_number));
   const blueReports = reports.filter((r) => blueTeams.includes(r.target_team_number));
 
   const status = nexusLive ? nexus.status : null;
   const heroNexus = nexusMatchFor(status, match);
   // Prefer a Nexus live label for the hero; else the formatted schedule label.
-  const heroLabel = heroNexus?.label ?? formatMatchKey(match.comp_level, match.match_number);
+  const heroLabelFull = heroNexus?.label ?? formatMatchKey(match.comp_level, match.match_number);
+  const heroLabel = shortMatchLabel(heroLabelFull);
   const heroTime =
     shortTimeMs(heroNexus?.times.estimatedStartTime ?? null) ?? shortTime(match.scheduled_time);
+  // Status line under the hero match number, broadcast-style ("queuing soon").
+  const heroStatus =
+    heroNexus?.status?.toLowerCase() === 'now queuing'
+      ? 'queuing soon'
+      : heroNexus?.status
+        ? heroNexus.status
+        : heroTime
+          ? `scheduled ${heroTime}`
+          : 'upcoming';
 
   // Upcoming rail: ONLY OUR (3256) upcoming matches — prefer Nexus' ordered list,
   // else the schedule. (The On-Field/Queuing tiles still reflect the whole field.)
@@ -458,7 +513,7 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
           label: nm.label,
           red: nm.redTeams,
           blue: nm.blueTeams,
-          time: shortTimeMs(nm.times.estimatedStartTime),
+          time: dayTimeMs(nm.times.estimatedStartTime),
           isOurs: true,
         }))
       : allMatches
@@ -474,163 +529,103 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
             label: formatMatchKey(m.comp_level, m.match_number),
             red: redTeamsOf(m),
             blue: blueTeamsOf(m),
-            time: shortTime(m.scheduled_time),
+            time: dayTime(m.scheduled_time),
             isOurs: true,
           }));
 
   return (
     <div data-testid="dash-next" className="flex flex-col gap-4 text-foreground">
-      {/* Event title bar. */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* Top bar: event name (left) · base team + event key (right). */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-black/30 px-4 py-3">
         <h2
           data-testid="dash-next-event-title"
-          className="text-xl font-bold tracking-tight text-foreground"
+          className="text-2xl font-bold tracking-tight text-foreground"
         >
           {eventInfo.name ?? eventKey}
         </h2>
-        <span className="font-mono text-sm text-muted-foreground">
-          {eventKey} · {baseTeam}
+        <span className="text-lg font-semibold text-muted-foreground">
+          <span className="text-foreground">{baseTeam}</span> | {eventKey}
         </span>
       </div>
 
-      {/* Livestream — full width + large so it's the centerpiece of the view. */}
-      <div className="mx-auto w-full max-w-5xl">
-        <EventStream webcast={eventInfo.webcast} />
-      </div>
-
-      {/* Main row: OUR next match (left) · event + season rankings (right). */}
+      {/* Broadcast grid (no leaderboard): LEFT = livestream + event/season
+          rankings; RIGHT = OUR next match + live field status + OUR upcoming. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
-        {/* LEFT — OUR next-match hero, live field tiles, OUR upcoming rail. */}
+        {/* LEFT — livestream over the event & season ranking blocks. */}
         <div className="flex flex-col gap-4">
-      {/* Hero: OUR next match. The match label is the loudest thing on the page. */}
-      <Card
-        className={cn(
-          'relative overflow-hidden border-2',
-          ourSide === 'red' ? 'border-red-500/50' : 'border-blue-500/50',
-        )}
-      >
-        <CardContent className="flex flex-col gap-3 p-5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              Next match · {baseTeam}
-            </span>
-            {nexusLive ? <LiveBadge /> : null}
+          <EventStream webcast={eventInfo.webcast} />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <EventRankSummary row={ourRankRow} teamCount={rankRows.length || null} />
+            <SeasonStats
+              team={baseTeam}
+              worldRank={season.worldRank}
+              totalEpa={season.totalEpa}
+              epaSource={season.epaSource}
+              seasonRecord={season.seasonRecord}
+            />
           </div>
-          <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-            <div>
-              <div
-                data-testid="dash-next-title"
-                className="text-4xl font-black leading-none tracking-tight text-foreground"
-              >
-                {heroLabel}
-              </div>
-              <div className="mt-2 flex items-center gap-2 text-sm">
-                <span
-                  className={cn(
-                    'rounded-full px-2.5 py-0.5 font-semibold uppercase tracking-wide',
-                    ourSide === 'red'
-                      ? 'bg-red-500/15 text-red-400'
-                      : 'bg-blue-500/15 text-blue-400',
-                  )}
-                >
-                  {ourSide} alliance
-                </span>
-                {heroTime ? (
-                  <span className="flex items-center gap-1 text-muted-foreground">
-                    <Clock className="size-3.5" /> {heroTime}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Red win prob
-              </div>
-              <div
-                data-testid="dash-next-red-winprob"
-                className="text-3xl font-bold tabular-nums text-brand"
-              >
-                {pct(pred.redWinProb)}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Live field-status tiles — degrade to "No live data" when Nexus is down. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <StatusTile
-          label="On field"
-          tone="brand"
-          icon={<Radio />}
-          match={status?.onField ?? null}
-        />
-        <StatusTile
-          label="Queuing"
-          tone="energy"
-          icon={<Flag />}
-          match={status?.queuing ?? null}
-        />
-      </div>
-
-      {/* Upcoming rail — prefers Nexus order, falls back to the schedule. */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4">
-          <CardTitle className="flex items-center gap-2 text-base text-foreground">
-            <Trophy className="size-4 text-muted-foreground" /> Upcoming
-          </CardTitle>
-          {nexusLive ? <LiveBadge /> : null}
-        </CardHeader>
-        <CardContent className="p-4 pt-0">
-          {upcoming.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No upcoming matches.</p>
-          ) : (
-            <ul data-testid="dash-next-upcoming" className="flex flex-col gap-1.5">
-              {upcoming.map((u) => (
-                <li
-                  key={u.key}
-                  className={cn(
-                    'flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm',
-                    u.isOurs ? 'border-brand/40 bg-brand/5' : 'border-border bg-card/40',
-                  )}
-                >
-                  <span className="min-w-[5.5rem] font-semibold text-foreground">{u.label}</span>
-                  <span className="flex flex-1 flex-wrap items-center gap-1">
-                    {u.red.map((t) => (
-                      <TeamChip key={`r${t}`} team={t} color="red" />
-                    ))}
-                    <span className="px-0.5 text-[10px] uppercase text-muted-foreground">vs</span>
-                    {u.blue.map((t) => (
-                      <TeamChip key={`b${t}`} team={t} color="blue" />
-                    ))}
-                  </span>
-                  {u.time ? <span className="text-xs text-muted-foreground">{u.time}</span> : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
         </div>
 
-        {/* RIGHT — event + season rankings (bigger now the leaderboard is gone). */}
-        <div className="flex flex-col gap-4">
-          <EventRankSummary row={ourRankRow} teamCount={rankRows.length || null} />
-          <SeasonStats
-            team={baseTeam}
-            worldRank={season.worldRank}
-            totalEpa={season.totalEpa}
-            epaSource={season.epaSource}
-            seasonRecord={season.seasonRecord}
-          />
+        {/* RIGHT — next match hero, live field status, OUR upcoming rail. */}
+        <div className="flex flex-col gap-3">
+          {/* Next match — the loud red hero card. */}
+          <div className="rounded-xl bg-red-600 px-6 py-6 text-white">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-base font-semibold">{baseTeam} Next Match</span>
+              {nexusLive ? <LiveBadge /> : null}
+            </div>
+            <div
+              data-testid="dash-next-title"
+              className="mt-3 text-7xl font-black leading-none tracking-tight"
+            >
+              {heroLabel}
+            </div>
+            <div className="mt-3 text-base font-medium capitalize text-red-50/90">{heroStatus}</div>
+          </div>
+
+          {/* Live field status — On Field (gray) / Queuing (yellow). */}
+          <div className="grid grid-cols-2 gap-3">
+            <FieldTile label="On Field" tone="gray" match={status?.onField ?? null} />
+            <FieldTile label="Queuing" tone="yellow" match={status?.queuing ?? null} />
+          </div>
+
+          {/* Upcoming — OUR matches only, broadcast team-grid cards. */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Upcoming
+              </div>
+              {nexusLive ? <LiveBadge /> : null}
+            </div>
+            {upcoming.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No upcoming matches for {baseTeam}.</p>
+            ) : (
+              <ul data-testid="dash-next-upcoming" className="flex flex-col gap-2">
+                {upcoming.map((u) => (
+                  <UpcomingCard key={u.key} u={u} baseTeam={baseTeam} />
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Prediction breakdown — keep the selector + per-team detail + auto routines. */}
       <div className="flex flex-col gap-1">
-        <label htmlFor="dash-next-match-select" className="text-sm font-medium text-muted-foreground">
-          Prediction for match
-        </label>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label htmlFor="dash-next-match-select" className="text-sm font-medium text-muted-foreground">
+            Prediction for match
+          </label>
+          <span className="text-sm text-muted-foreground">
+            Red win{' '}
+            <span
+              data-testid="dash-next-red-winprob"
+              className="font-bold tabular-nums text-brand"
+            >
+              {pct(pred.redWinProb)}
+            </span>
+          </span>
+        </div>
         <select
           id="dash-next-match-select"
           data-testid="dash-next-match-select"

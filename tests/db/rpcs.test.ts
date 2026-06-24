@@ -112,24 +112,19 @@ it('upsert_match_report SUCCEEDS for scout owned by caller (forge guard - self)'
   expect(error, `own report should succeed: ${error?.message}`).toBeNull();
 });
 
-it('upsert_match_report REJECTS a forged scout_id (forge guard - foreign)', async () => {
-  // Seed a second scout owned by a DIFFERENT auth user via admin (service role).
-  const foreignAuthUid = crypto.randomUUID();
-  const { data: foreignScout, error: seedErr } = await admin
-    .from('scout')
-    .insert({ event_key: EVENT, display_name: 'Foreign Scout', auth_uid: foreignAuthUid })
-    .select('id')
-    .single();
-  expect(seedErr, `foreign scout seed: ${seedErr?.message}`).toBeNull();
-  const foreignScoutId = foreignScout!.id;
-
+it('upsert_match_report REJECTS a non-existent scout_id (referential guard, 0012)', async () => {
+  // 0012 relaxed the ownership gate to a REFERENTIAL check to fix login-less
+  // uploads dead-lettering: a scout_id must reference a real scout row, but need
+  // NOT be owned by the caller (open, single-team posture). So a non-existent
+  // scout_id is rejected with SQLSTATE 23503 (it raises before any insert), while
+  // a non-owned-but-existing scout_id is now accepted (no longer 42501).
   const reportId = crypto.randomUUID();
   const forgedReport = {
     id: reportId,
     schema_version: 1,
     event_key: EVENT,
     match_key: MATCH2,
-    scout_id: foreignScoutId,  // NOT owned by this anon user
+    scout_id: crypto.randomUUID(), // references no scout row
     target_team_number: TEAM,
     alliance_color: 'blue',
     station: 2,
@@ -138,9 +133,6 @@ it('upsert_match_report REJECTS a forged scout_id (forge guard - foreign)', asyn
     fuel_bursts: [],
   };
   const { error } = await anon.rpc('upsert_match_report', { p: forgedReport });
-  expect(error, 'should be rejected').not.toBeNull();
-  expect(error!.code).toBe('42501');
-
-  // Cleanup foreign scout
-  await admin.from('scout').delete().eq('id', foreignScoutId);
+  expect(error, 'non-existent scout should be rejected').not.toBeNull();
+  expect(error!.code).toBe('23503');
 });

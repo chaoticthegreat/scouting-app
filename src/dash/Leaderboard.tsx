@@ -8,8 +8,8 @@
 //   - Leaderboard (default): the full ranking table Card.
 //   - EventRankSummary: "Event Rankings" StatTiles for OUR team.
 
+import type { ReactNode } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { StatTile } from '@/components/ui/StatTile';
 import { cn } from '@/lib/utils';
 
 const EM_DASH = '—';
@@ -168,6 +168,52 @@ export interface EventRankSummaryProps {
  * "Event Rankings" tiles for OUR team: record, rank (out of the field), avg RP.
  * Degrades to em-dashes when our row is unavailable.
  */
+/**
+ * A colored broadcast stat tile: small label + big tabular value, with an
+ * optional `sub` node in the corner. Shared by the Event/Season ranking blocks
+ * so both match the broadcast look (light tiles popping off the dark page).
+ */
+export function RankTile({
+  label,
+  value,
+  testid,
+  tone,
+  big = false,
+  sub = null,
+}: {
+  label: string;
+  value: string;
+  testid: string;
+  tone: 'green' | 'blue' | 'gray';
+  big?: boolean;
+  sub?: ReactNode;
+}): JSX.Element {
+  const bg = {
+    green: 'bg-emerald-100 text-emerald-950',
+    blue: 'bg-sky-100 text-sky-950',
+    gray: 'bg-neutral-200 text-neutral-900',
+  }[tone];
+  const labelColor = {
+    green: 'text-emerald-700',
+    blue: 'text-sky-700',
+    gray: 'text-neutral-600',
+  }[tone];
+  return (
+    <div className={cn('rounded-lg px-4 py-3', bg)}>
+      <div className="flex items-center justify-between gap-2">
+        <div className={cn('text-sm font-semibold', labelColor)}>{label}</div>
+        {sub}
+      </div>
+      <div
+        data-testid={testid}
+        className={cn('mt-1 font-black leading-none tabular-nums', big ? 'text-5xl' : 'text-3xl')}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
 export function EventRankSummary(props: EventRankSummaryProps): JSX.Element {
   const { row, teamCount } = props;
 
@@ -176,22 +222,15 @@ export function EventRankSummary(props: EventRankSummaryProps): JSX.Element {
   const avgRp = row ? row.rp.toFixed(3) : EM_DASH;
 
   return (
-    <div data-testid="dash-event-rank" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      <StatTile
-        label="Event Record"
-        tone="default"
-        value={<span data-testid="dash-event-record">{record}</span>}
-      />
-      <StatTile
-        label="Event Rank"
-        tone="brand"
-        value={<span data-testid="dash-event-rank-value">{rankValue}</span>}
-      />
-      <StatTile
-        label="Avg RP"
-        tone="energy"
-        value={<span data-testid="dash-event-avg-rp">{avgRp}</span>}
-      />
+    <div data-testid="dash-event-rank" className="flex flex-col gap-2">
+      <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        Event Rankings
+      </div>
+      <RankTile tone="green" big label="Event Record" value={record} testid="dash-event-record" />
+      <div className="grid grid-cols-2 gap-2">
+        <RankTile tone="green" label="Event Rank" value={rankValue} testid="dash-event-rank-value" />
+        <RankTile tone="green" label="Avg RP" value={avgRp} testid="dash-event-avg-rp" />
+      </div>
     </div>
   );
 }

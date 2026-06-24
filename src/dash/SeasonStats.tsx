@@ -12,10 +12,8 @@
 // orchestrator resolves which EPA to show (Statbotics or in-house) and passes
 // `epaSource` so this card can label it correctly.
 
-import { Trophy, Globe, Gauge } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { StatTile } from '@/components/ui/StatTile';
 import { cn } from '@/lib/utils';
+import { RankTile } from '@/dash/Leaderboard';
 import { computeLocalEpa } from '@/dash/localEpa';
 import type { MatchRow } from '@/dash/useEventData';
 
@@ -108,27 +106,19 @@ function InHouseBadge() {
     <span
       data-testid="dash-season-epa-source"
       title="Computed in-house from TheBlueAlliance match results — Statbotics EPA unavailable"
-      className="inline-flex items-center rounded-full border border-energy/40 bg-energy/15 px-2 py-0.5 text-[11px] font-medium text-energy"
+      className="inline-flex items-center rounded-full bg-sky-700/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700"
     >
       in-house
     </span>
   );
 }
 
-/** Subtle label crediting Statbotics as the EPA source. */
-function StatboticsLabel() {
-  return (
-    <span className="text-[11px] font-medium text-muted-foreground">Statbotics</span>
-  );
-}
-
 /**
- * "Season Rankings" card for the broadcast dashboard. Shows OUR team's World
- * Rank, Total EPA (Statbotics when available, otherwise the in-house TBA-derived
- * estimate — clearly labelled), and Season Record. Crashes on nothing.
+ * "Season Rankings" block for the broadcast dashboard. Shows OUR team's Season
+ * Record (gray), World Rank + Total EPA (blue) — Statbotics when available, else
+ * the in-house TBA-derived estimate (clearly labelled). Crashes on nothing.
  */
 export default function SeasonStats({
-  team,
   worldRank,
   totalEpa,
   epaSource,
@@ -136,51 +126,34 @@ export default function SeasonStats({
   className,
 }: SeasonStatsProps): JSX.Element {
   const showInHouse = epaSource === 'inhouse' && totalEpa != null;
-  const showStatbotics = epaSource === 'statbotics' && totalEpa != null;
 
   return (
-    <Card data-testid="dash-season-rank" className={cn(className)}>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4">
-        <CardTitle className="flex items-center gap-2 text-base text-foreground">
-          <Trophy className="size-4 text-muted-foreground" /> Season Rankings
-        </CardTitle>
-        <span className="font-mono text-xs text-muted-foreground">{team}</span>
-      </CardHeader>
-      <CardContent className="grid grid-cols-1 gap-3 p-4 pt-0 sm:grid-cols-3">
-        <StatTile
-          label="Season Record"
-          tone="brand"
-          icon={<Trophy />}
-          value={<span data-testid="dash-season-record">{seasonRecord ?? '—'}</span>}
-        />
-        <StatTile
+    <div data-testid="dash-season-rank" className={cn('flex flex-col gap-2', className)}>
+      <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        Season Rankings
+      </div>
+      <RankTile
+        tone="gray"
+        big
+        label="Season Record"
+        value={seasonRecord ?? '—'}
+        testid="dash-season-record"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <RankTile
+          tone="blue"
           label="World Rank"
-          tone="energy"
-          icon={<Globe />}
-          value={
-            <span data-testid="dash-season-world-rank">
-              {worldRank != null ? `#${worldRank}` : '—'}
-            </span>
-          }
+          value={worldRank != null ? `#${worldRank}` : '—'}
+          testid="dash-season-world-rank"
         />
-        <StatTile
+        <RankTile
+          tone="blue"
           label="Total EPA"
-          tone="brand"
-          icon={<Gauge />}
-          value={
-            <span data-testid="dash-season-epa">
-              {totalEpa != null ? totalEpa.toFixed(1) : '—'}
-            </span>
-          }
-          sub={
-            showInHouse ? (
-              <InHouseBadge />
-            ) : showStatbotics ? (
-              <StatboticsLabel />
-            ) : null
-          }
+          value={totalEpa != null ? totalEpa.toFixed(1) : '—'}
+          testid="dash-season-epa"
+          sub={showInHouse ? <InHouseBadge /> : null}
         />
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

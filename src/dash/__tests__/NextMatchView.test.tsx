@@ -276,14 +276,14 @@ describe('NextMatchView', () => {
     expect(selector).toBeTruthy();
     expect(selector.value).toBe('2026evt_qm2');
 
-    // The header reflects the selected (default) match: Qual 2.
-    expect(getByTestId('dash-next-title').textContent).toMatch(/Qual 2/);
+    // The header reflects the selected (default) match in broadcast short form: Q2.
+    expect(getByTestId('dash-next-title').textContent).toMatch(/Q2/);
     // OUR team's row is present for the default selection.
     expect(getByTestId(`dash-next-team-${OUR_TEAM}`)).toBeTruthy();
 
     // Override: pick qm3 (does NOT include 3256).
     fireEvent.change(selector, { target: { value: '2026evt_qm3' } });
-    expect(getByTestId('dash-next-title').textContent).toMatch(/Qual 3/);
+    expect(getByTestId('dash-next-title').textContent).toMatch(/Q3/);
     // qm3 teams: 777,888,999 / 666,555,444 — six team rows, no 3256.
     const rows = getAllByTestId(/^dash-next-team-\d+$/);
     const numbers = rows.map((r) => r.getAttribute('data-testid'));

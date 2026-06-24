@@ -7,7 +7,19 @@
 // matches. Dark theme, shadcn primitives, 44px touch targets.
 
 import { useEffect, useMemo, useState } from 'react';
-import { Wrench, Cog, Sparkles, Inbox, Image as ImageIcon, StickyNote } from 'lucide-react';
+import {
+  Wrench,
+  Cog,
+  Sparkles,
+  Inbox,
+  Image as ImageIcon,
+  StickyNote,
+  Trophy,
+  MapPin,
+  Video,
+  Crosshair,
+  ExternalLink,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Sheet } from '@/components/ui/Sheet';
 import { cn } from '@/lib/utils';
@@ -19,9 +31,16 @@ import {
   useEventScouts,
   useEventEpa,
   useEventMatches,
+  useTbaTeam,
+  useTbaTeamEventStatus,
+  useTeamSeasonStats,
+  type MatchRow,
 } from '@/dash/useEventData';
 import { useTeamPit, type TeamPit } from '@/dash/useTeamPit';
 import ReportDetail from '@/dash/ReportDetail';
+import MatchVideo from '@/dash/MatchVideo';
+import TeamTimeline from '@/dash/TeamTimeline';
+import { MATCH_MS } from '@/dash/matchTimeline';
 import { BarChart, LineChart, StackedBar } from '@/dash/charts';
 import type { MsrRow } from '@/dash/types';
 
@@ -46,6 +65,18 @@ function fmt(n: number, digits = 1): string {
 function pct(n: number): string {
   if (!Number.isFinite(n)) return '—';
   return `${(n * 100).toFixed(0)}%`;
+}
+
+// Chronological ordering for match keys: quals first, then the playoff rounds,
+// then finals — so the "last" scouted match is the latest the team actually
+// played, not just the lexicographically-largest key (qm10 < qm9 as strings).
+const COMP_ORDER: Record<string, number> = { qm: 0, ef: 1, qf: 2, sf: 3, f: 4 };
+function matchOrder(matchKey: string): number {
+  const tail = matchKey.includes('_') ? matchKey.slice(matchKey.lastIndexOf('_') + 1) : matchKey;
+  const m = tail.match(/^([a-zA-Z]+)(\d+)/);
+  if (!m) return 0;
+  const level = COMP_ORDER[m[1].toLowerCase()] ?? 0;
+  return level * 100000 + Number(m[2]);
 }
 
 function Stat(props: {
@@ -93,6 +124,189 @@ function ChipRow(props: {
         <span className="text-sm text-muted-foreground">—</span>
       )}
     </div>
+  );
+}
+
+/** Format a W-L-T record, or em-dash when no parts are known. */
+function recordStr(w: number | null, l: number | null, t: number | null): string {
+  if (w == null && l == null && t == null) return '—';
+  return `${w ?? 0}-${l ?? 0}-${t ?? 0}`;
+}
+
+/** Human location string from TBA city / state / country parts. */
+function locationStr(city: string | null, state: string | null, country: string | null): string {
+  const parts = [city, state, country].filter((p): p is string => !!p);
+  return parts.length ? parts.join(', ') : '—';
+}
+
+/**
+ * The Blue Alliance panel: live event rank + record, season world rank + EPA +
+ * record (Statbotics with in-house fallback), team identity / location, and a
+ * deep link to the team's TBA page. Every field degrades to "—" so a TBA outage
+ * never blanks the team view.
+ */
+function TeamTbaPanel(props: {
+  team: number;
+  eventKey: string;
+  matches: MatchRow[];
+}): JSX.Element {
+  const { team, eventKey, matches } = props;
+  const info = useTbaTeam(team).data ?? null;
+  const status = useTbaTeamEventStatus(team, eventKey).data ?? null;
+  const season = useTeamSeasonStats(team, eventKey, matches).data ?? null;
+  const year = eventKey.slice(0, 4);
+
+  const eventRank =
+    status?.rank != null
+      ? `#${status.rank}${status.numTeams != null ? ` / ${status.numTeams}` : ''}`
+      : '—';
+  const worldRank = season?.worldRank != null ? `#${season.worldRank}` : '—';
+  const seasonEpa = season?.totalEpa != null ? fmt(season.totalEpa) : '—';
+  const epaHint =
+    season?.totalEpa != null
+      ? season.epaSource === 'statbotics'
+        ? 'Statbotics season EPA'
+        : 'in-house estimate (Statbotics offline)'
+      : undefined;
+
+  return (
+    <Card className="border-zinc-800 bg-zinc-950" data-testid="team-tba">
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+        <CardTitle className="flex items-center gap-2 text-zinc-100">
+          <Trophy className="size-5 text-brand" />
+          The Blue Alliance
+        </CardTitle>
+        <a
+          data-testid="team-tba-link"
+          href={`https://www.thebluealliance.com/team/${team}/${year}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-200"
+        >
+          View on TBA <ExternalLink className="size-3.5" />
+        </a>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {info?.nickname || info?.name ? (
+          <div data-testid="team-tba-name" className="flex flex-col gap-0.5">
+            <span className="text-base font-semibold text-zinc-100">{info.nickname ?? info.name}</span>
+            {info.nickname && info.name && info.name !== info.nickname ? (
+              <span className="text-xs text-zinc-500">{info.name}</span>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <Stat label="Event rank" value={eventRank} testid="team-tba-event-rank" />
+          <Stat
+            label="Event record"
+            value={recordStr(status?.wins ?? null, status?.losses ?? null, status?.ties ?? null)}
+            testid="team-tba-event-record"
+          />
+          <Stat label="World rank" value={worldRank} testid="team-tba-world-rank" hint={`${year} season`} />
+          <Stat label="Season EPA" value={seasonEpa} testid="team-tba-season-epa" hint={epaHint} />
+          <Stat
+            label="Season record"
+            value={season?.seasonRecord ?? '—'}
+            testid="team-tba-season-record"
+          />
+          <Stat
+            label="Rookie year"
+            value={info?.rookieYear != null ? String(info.rookieYear) : '—'}
+            testid="team-tba-rookie-year"
+          />
+        </div>
+        <div
+          data-testid="team-tba-location"
+          className="flex items-center gap-1.5 text-sm text-zinc-400"
+        >
+          <MapPin className="size-4 text-zinc-500" />
+          {locationStr(info?.city ?? null, info?.stateProv ?? null, info?.country ?? null)}
+          {status?.allianceName ? (
+            <span className="ml-2 rounded-full border border-brand/40 bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">
+              {status.allianceName}
+            </span>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Last-match card: embeds the TBA video for the team's most-recent scouted match
+ * and overlays OUR activity timeline for that report, with an optional playhead
+ * synced to the video (press "Sync to match start" once the video's auto kickoff
+ * lines up). The timeline degrades on its own for legacy reports without
+ * timestamps; the video degrades to a "no video" note when TBA has none yet.
+ */
+function LastMatchCard(props: { report: MsrRow }): JSX.Element {
+  const { report } = props;
+  const [videoSeconds, setVideoSeconds] = useState<number | null>(null);
+  const [offsetSeconds, setOffsetSeconds] = useState(0);
+
+  const currentTimeMs = useMemo(() => {
+    if (videoSeconds == null || !Number.isFinite(videoSeconds)) return null;
+    const ms = (videoSeconds - offsetSeconds) * 1000;
+    return Math.max(0, Math.min(MATCH_MS, ms));
+  }, [videoSeconds, offsetSeconds]);
+
+  const hasTime = videoSeconds != null && Number.isFinite(videoSeconds);
+  const matchSecs = hasTime ? Math.max(0, (videoSeconds as number) - offsetSeconds) : null;
+
+  return (
+    <Card className="border-zinc-800 bg-zinc-950" data-testid="team-last-match">
+      <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+        <Video className="size-5 text-brand" />
+        <CardTitle className="text-zinc-100">
+          Last match — {formatMatchKeyRaw(report.match_key)}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <div className="mx-auto w-full max-w-xl">
+          <MatchVideo matchKey={report.match_key} onTimeMs={(ms) => setVideoSeconds(ms / 1000)} />
+        </div>
+        <div
+          data-testid="team-last-match-sync"
+          className="flex flex-wrap items-center justify-between gap-2 text-sm"
+        >
+          <span className="inline-flex items-center gap-2 tabular-nums text-zinc-400">
+            <Crosshair className="size-4 text-brand" />
+            {hasTime ? (
+              <>
+                <span>video {(videoSeconds as number).toFixed(1)}s</span>
+                <span className="text-zinc-200">· match {(matchSecs as number).toFixed(1)}s</span>
+              </>
+            ) : (
+              <span>Play the video, then sync to match start.</span>
+            )}
+          </span>
+          <span className="flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="team-last-match-sync-now"
+              disabled={!hasTime}
+              onClick={() => {
+                if (videoSeconds != null) setOffsetSeconds(videoSeconds);
+              }}
+              className="rounded-md border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              Sync to match start
+            </button>
+            {offsetSeconds !== 0 ? (
+              <button
+                type="button"
+                data-testid="team-last-match-sync-reset"
+                onClick={() => setOffsetSeconds(0)}
+                className="rounded-md border border-zinc-700 bg-zinc-800/40 px-3 py-1.5 text-zinc-400 hover:bg-zinc-800/70"
+              >
+                Reset
+              </button>
+            ) : null}
+          </span>
+        </div>
+        <TeamTimeline report={report} currentTimeMs={currentTimeMs} />
+      </CardContent>
+    </Card>
   );
 }
 
@@ -237,6 +451,8 @@ function TeamTrends(props: { matches: MsrRow[] }): JSX.Element {
 function TeamDetail(props: {
   agg: TeamAgg;
   matches: MsrRow[];
+  tbaNode: JSX.Element;
+  lastMatchNode: JSX.Element | null;
   epaNode: JSX.Element;
   pitNode: JSX.Element;
   scoutName: (id: string | null | undefined) => string;
@@ -250,6 +466,12 @@ function TeamDetail(props: {
 
   return (
     <div data-testid="team-detail" className="flex flex-col gap-4">
+      {/* The Blue Alliance: rank, record, season stats, location. */}
+      {props.tbaNode}
+
+      {/* Last-match video + our activity timeline. */}
+      {props.lastMatchNode}
+
       {/* Fuel */}
       <Card className="border-zinc-800 bg-zinc-950">
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
@@ -469,6 +691,15 @@ export default function TeamView(props: TeamViewProps): JSX.Element {
     [reports, selected],
   );
 
+  // The team's most-recent scouted match (latest by chronological match order)
+  // anchors the last-match video + timeline. Null when nothing's been scouted.
+  const lastReport = useMemo(() => {
+    if (teamMatches.length === 0) return null;
+    return teamMatches.reduce((latest, r) =>
+      matchOrder(r.match_key) > matchOrder(latest.match_key) ? r : latest,
+    );
+  }, [teamMatches]);
+
   // EPA node: number when available, "unavailable" note when Statbotics is down.
   const epa = epaQuery.data;
   const epaValue = selected != null ? epa?.epaByTeam.get(selected) ?? null : null;
@@ -494,6 +725,13 @@ export default function TeamView(props: TeamViewProps): JSX.Element {
   );
 
   const pitNode = <PitPanel pit={pitQuery.data ?? null} isLoading={pitQuery.isLoading} />;
+
+  // TBA + last-match nodes only make sense once a team is chosen.
+  const tbaNode =
+    selected != null ? (
+      <TeamTbaPanel team={selected} eventKey={eventKey} matches={matchesQuery.data ?? []} />
+    ) : null;
+  const lastMatchNode = lastReport ? <LastMatchCard report={lastReport} /> : null;
 
   return (
     <div data-testid="dash-team" className="flex flex-col gap-4 text-zinc-100">
@@ -547,6 +785,8 @@ export default function TeamView(props: TeamViewProps): JSX.Element {
           <TeamDetail
             agg={agg}
             matches={teamMatches}
+            tbaNode={tbaNode ?? <></>}
+            lastMatchNode={lastMatchNode}
             epaNode={epaNode}
             pitNode={pitNode}
             scoutName={scoutName}
@@ -555,6 +795,8 @@ export default function TeamView(props: TeamViewProps): JSX.Element {
         </div>
       ) : (
         <div className="flex flex-col gap-4">
+          {/* TBA rank/record/season stats need no scouting reports — show them. */}
+          {tbaNode}
           <div
             data-testid="team-no-data"
             className="rounded-md border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400"

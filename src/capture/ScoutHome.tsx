@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { BarChart3, UserRound, LogOut, Search, Target, Wrench, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
@@ -148,7 +148,6 @@ type ScoutMode = 'match' | 'pit';
 
 export default function ScoutHome() {
   const { scout } = useSession();
-  const navigate = useNavigate();
   // Match/Pit switch. Deep-linkable via ?mode=pit; the toggle keeps it in the URL.
   const [searchParams, setSearchParams] = useSearchParams();
   const mode: ScoutMode = searchParams.get('mode') === 'pit' ? 'pit' : 'match';
@@ -169,7 +168,10 @@ export default function ScoutHome() {
   // scout row until a new name is picked, so `scout` is still truthy on reload).
   const [loggedOut, setLoggedOut] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
-  const effective = loggedOut ? null : scout ?? picked;
+  // A fresh pick on THIS device wins over the session-resolved row: re-picking
+  // after logout updates the same auth_uid's scout row, but useSession may still
+  // hold the stale name until it refetches — `picked` reflects the new choice now.
+  const effective = loggedOut ? null : picked ?? scout;
   const scoutId = effective?.id ?? '';
 
   // Resolve the active event without React Query (keeps this screen provider-free).
@@ -324,9 +326,15 @@ export default function ScoutHome() {
 
   const logOut = () => {
     forgetScouterName();
-    // Return to the home screen (the Scout / Lead Dashboard chooser) after logging
-    // out. Leaving this route unmounts ScoutHome, clearing all local scout state.
-    navigate('/');
+    // Show the name picker in place so a new scouter can take over this device.
+    // We do NOT navigate away or reload: the device's anonymous auth.uid stays
+    // bound to the old scout row (useSession would re-resolve it on a fresh
+    // mount), so the only reliable way to surface the picker is the `loggedOut`
+    // override below. Clearing `picked` drops the previous in-session choice; the
+    // gate (`!effective`) then renders NamePicker, and onPicked re-points the row.
+    setPicked(null);
+    setConfirmLogout(false);
+    setLoggedOut(true);
   };
 
   return (

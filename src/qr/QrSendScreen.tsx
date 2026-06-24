@@ -62,7 +62,10 @@ export default function QrSendScreen() {
     if (lastRendered.current === payload) return;
     lastRendered.current = payload;
     let cancelled = false;
-    void QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 1, width: 320 }).then(
+    // Render at a higher internal resolution than the 320px display box so each
+    // module stays crisp when the camera samples it (sharper edges → fewer decode
+    // misses). errorCorrectionLevel 'M' tolerates screen glare/partial occlusion.
+    void QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 2, width: 512 }).then(
       (url) => {
         if (!cancelled) setDataUrl(url);
       },

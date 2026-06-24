@@ -159,6 +159,103 @@ export function useTbaRankings<T = unknown>(eventKey: string | null): UseQueryRe
   });
 }
 
+function asString(v: unknown): string | null {
+  return typeof v === 'string' && v ? v : null;
+}
+function asFiniteNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/** TBA team header info (`/team/frcN`): identity + location. */
+export interface TbaTeamInfo {
+  nickname: string | null;
+  name: string | null;
+  city: string | null;
+  stateProv: string | null;
+  country: string | null;
+  rookieYear: number | null;
+  website: string | null;
+}
+
+/**
+ * TBA team header (nickname, location, rookie year, website) for a single team.
+ * Degrades to `null` when TBA is unreachable or the team is unknown — never
+ * hard-fails the team view.
+ */
+export function useTbaTeam(team: number | null): UseQueryResult<TbaTeamInfo | null> {
+  return useQuery({
+    queryKey: ['tba', 'team', team],
+    enabled: team != null && team > 0,
+    staleTime: STALE_TIME,
+    queryFn: async (): Promise<TbaTeamInfo | null> => {
+      try {
+        const d = await tbaGet<Record<string, unknown>>(`/team/frc${team}`);
+        if (typeof d !== 'object' || d === null) return null;
+        return {
+          nickname: asString(d.nickname),
+          name: asString(d.name),
+          city: asString(d.city),
+          stateProv: asString(d.state_prov),
+          country: asString(d.country),
+          rookieYear: asFiniteNumber(d.rookie_year),
+          website: asString(d.website),
+        };
+      } catch {
+        return null;
+      }
+    },
+  });
+}
+
+/** A team's status AT a specific event (rank, record, alliance) from TBA. */
+export interface TbaTeamEventStatus {
+  rank: number | null;
+  numTeams: number | null;
+  wins: number | null;
+  losses: number | null;
+  ties: number | null;
+  allianceName: string | null;
+}
+
+/**
+ * TBA `/team/frcN/event/{eventKey}/status`: this team's qual ranking + record at
+ * this event, plus playoff alliance when seeded. Degrades to `null` (TBA down,
+ * or the team isn't at this event / no ranking yet) so the view never hard-fails.
+ */
+export function useTbaTeamEventStatus(
+  team: number | null,
+  eventKey: string | null,
+): UseQueryResult<TbaTeamEventStatus | null> {
+  return useQuery({
+    queryKey: ['tba', 'team-event-status', team, eventKey],
+    enabled: team != null && team > 0 && !!eventKey,
+    staleTime: STALE_TIME,
+    queryFn: async (): Promise<TbaTeamEventStatus | null> => {
+      try {
+        const d = await tbaGet<Record<string, unknown>>(
+          `/team/frc${team}/event/${eventKey}/status`,
+        );
+        // TBA returns a bare `null` body when the team has no status at the event.
+        if (typeof d !== 'object' || d === null) return null;
+        const qual = d.qual as Record<string, unknown> | null | undefined;
+        const ranking = qual?.ranking as Record<string, unknown> | null | undefined;
+        const record = ranking?.record as Record<string, unknown> | null | undefined;
+        const alliance = d.alliance as Record<string, unknown> | null | undefined;
+        return {
+          rank: asFiniteNumber(ranking?.rank),
+          numTeams: asFiniteNumber(qual?.num_teams),
+          wins: asFiniteNumber(record?.wins),
+          losses: asFiniteNumber(record?.losses),
+          ties: asFiniteNumber(record?.ties),
+          allianceName: asString(alliance?.name),
+        };
+      } catch {
+        return null;
+      }
+    },
+  });
+}
+
 /**
  * Statbotics EPA for a set of teams at an event, with a local fallback.
  *

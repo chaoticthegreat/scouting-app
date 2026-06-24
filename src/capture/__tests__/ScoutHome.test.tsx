@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 
 const assignmentRows = [
   // Upcoming (qm5 has no result yet) — should appear in the scout's to-do list.
@@ -189,15 +189,8 @@ describe('ScoutHome logout', () => {
     expect(logout.textContent).toMatch(/log out|switch/i);
   });
 
-  it('forgets the scouter and navigates home on logout', async () => {
-    render(
-      <MemoryRouter initialEntries={['/scout']}>
-        <Routes>
-          <Route path="/scout" element={<ScoutHome />} />
-          <Route path="/" element={<div data-testid="home-marker">Home</div>} />
-        </Routes>
-      </MemoryRouter>,
-    );
+  it('forgets the scouter and shows the name picker in place on logout', async () => {
+    renderHome();
     const logout = await screen.findByTestId('scout-logout');
     fireEvent.click(logout);
     // A confirm step may appear; if so, click the confirming control.
@@ -207,9 +200,11 @@ describe('ScoutHome logout', () => {
     await waitFor(() => {
       expect(forgetScouterName).toHaveBeenCalled();
     });
-    // Logout navigates to the home screen (Scout / Lead Dashboard chooser).
+    // Logout surfaces the name picker in place (no navigation/reload needed), so a
+    // new scouter can take over this device even though useSession still resolves
+    // the previous scout row for the device's anonymous auth.uid.
     await waitFor(() => {
-      expect(screen.getByTestId('home-marker')).toBeTruthy();
+      expect(screen.getByTestId('scout-name-picker')).toBeTruthy();
     });
   });
 

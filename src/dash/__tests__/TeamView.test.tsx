@@ -25,11 +25,24 @@ vi.mock('@/dash/useEventData', () => ({
   useEventEpa: (teams: number[], eventKey: string | null) =>
     useEventEpaMock(teams, eventKey),
   useEventMatches: () => ({ data: [], isLoading: false, isError: false, isSuccess: true }),
+  // TBA enrichment hooks degrade to null in this presentation test; the panels
+  // render their "—" fallbacks rather than hitting the network.
+  useTbaTeam: () => ({ data: null }),
+  useTbaTeamEventStatus: () => ({ data: null }),
+  useTeamSeasonStats: () => ({ data: null }),
 }));
 
 vi.mock('@/dash/useTeamPit', () => ({
   useTeamPit: (eventKey: string | null, teamNumber: number | null) =>
     useTeamPitMock(eventKey, teamNumber),
+}));
+
+// MatchVideo fetches the TBA match via react-query; stub it so the last-match
+// card renders without a QueryClient/network in this unit test.
+vi.mock('@/dash/MatchVideo', () => ({
+  default: ({ matchKey }: { matchKey: string }) => (
+    <div data-testid="match-video-stub">{matchKey}</div>
+  ),
 }));
 
 import TeamView from '@/dash/TeamView';

@@ -51,6 +51,9 @@ function makeReport(
     fedCorral: false,
     notes: '',
     syncState,
+    rowRevision: 1,
+    syncAttempts: 0,
+    lastSyncError: null,
   };
 }
 

@@ -10,6 +10,12 @@ import {
   getUnsynced,
   countUnsynced,
   markSynced,
+  markPending,
+  markSyncError,
+  markDirtyRetry,
+  getSyncQueue,
+  listDeadLetters,
+  requeueReport,
   saveDraft,
   getDraft,
   listDrafts,
@@ -63,6 +69,9 @@ function makeReport(overrides: Partial<LocalMatchReport> = {}): LocalMatchReport
     fedCorral: false,
     notes: '',
     syncState: 'dirty',
+    rowRevision: 1,
+    syncAttempts: 0,
+    lastSyncError: null,
     ...overrides,
   };
 }
@@ -125,6 +134,110 @@ describe('STORE sync state', () => {
     await markSynced('u1');
     expect(await countUnsynced()).toBe(1);
     expect((await getUnsynced()).map((r) => r.id)).toEqual(['u2']);
+  });
+});
+
+describe('STORE sync queue helpers', () => {
+  beforeEach(async () => {
+    await db.reports.clear();
+  });
+
+  it('getSyncQueue returns dirty + pending only (not error/synced), oldest first', async () => {
+    await saveReport(
+      makeReport({
+        id: 'q-dirty',
+        syncState: 'dirty',
+        createdAt: '2026-06-23T00:00:01.000Z',
+      }),
+    );
+    await saveReport(
+      makeReport({
+        id: 'q-pending',
+        syncState: 'pending',
+        createdAt: '2026-06-23T00:00:00.000Z',
+      }),
+    );
+    await saveReport(makeReport({ id: 'q-error', syncState: 'error' }));
+    await saveReport(makeReport({ id: 'q-synced', syncState: 'synced' }));
+
+    const queue = await getSyncQueue();
+    // oldest first by createdAt: q-pending (00:00) before q-dirty (00:01)
+    expect(queue.map((r) => r.id)).toEqual(['q-pending', 'q-dirty']);
+  });
+
+  it('markPending flips syncState to pending', async () => {
+    await saveReport(makeReport({ id: 'mp1', syncState: 'dirty' }));
+    await markPending('mp1');
+    const got = (await listReports()).find((r) => r.id === 'mp1');
+    expect(got?.syncState).toBe('pending');
+  });
+
+  it('markSyncError dead-letters with the message', async () => {
+    await saveReport(makeReport({ id: 'me1', syncState: 'pending' }));
+    await markSyncError('me1', 'validation failed');
+    const got = (await listReports()).find((r) => r.id === 'me1');
+    expect(got?.syncState).toBe('error');
+    expect(got?.lastSyncError).toBe('validation failed');
+  });
+
+  it('markDirtyRetry returns to dirty, increments syncAttempts, records error', async () => {
+    await saveReport(
+      makeReport({ id: 'md1', syncState: 'pending', syncAttempts: 1 }),
+    );
+    await markDirtyRetry('md1', 'network blip');
+    const got = (await listReports()).find((r) => r.id === 'md1');
+    expect(got?.syncState).toBe('dirty');
+    expect(got?.syncAttempts).toBe(2);
+    expect(got?.lastSyncError).toBe('network blip');
+  });
+
+  it('listDeadLetters returns only error-state reports', async () => {
+    await saveReport(makeReport({ id: 'dl-error', syncState: 'error' }));
+    await saveReport(makeReport({ id: 'dl-dirty', syncState: 'dirty' }));
+    await saveReport(makeReport({ id: 'dl-synced', syncState: 'synced' }));
+
+    const dead = await listDeadLetters();
+    expect(dead.map((r) => r.id)).toEqual(['dl-error']);
+  });
+
+  it('requeueReport resets a dead-letter to dirty/0/null', async () => {
+    await saveReport(
+      makeReport({
+        id: 'rq1',
+        syncState: 'error',
+        syncAttempts: 5,
+        lastSyncError: 'boom',
+      }),
+    );
+    await requeueReport('rq1');
+    const got = (await listReports()).find((r) => r.id === 'rq1');
+    expect(got?.syncState).toBe('dirty');
+    expect(got?.syncAttempts).toBe(0);
+    expect(got?.lastSyncError).toBeNull();
+  });
+
+  it('reads default missing rowRevision/syncAttempts/lastSyncError', async () => {
+    // Simulate an older row written before the 3 fields existed.
+    const legacy = makeReport({ id: 'legacy1', syncState: 'dirty' });
+    delete (legacy as Partial<LocalMatchReport>).rowRevision;
+    delete (legacy as Partial<LocalMatchReport>).syncAttempts;
+    delete (legacy as Partial<LocalMatchReport>).lastSyncError;
+    await db.reports.put(legacy);
+
+    const queue = await getSyncQueue();
+    const got = queue.find((r) => r.id === 'legacy1');
+    expect(got?.rowRevision).toBe(1);
+    expect(got?.syncAttempts).toBe(0);
+    expect(got?.lastSyncError).toBeNull();
+  });
+
+  it('markDirtyRetry increments from a defaulted (missing) syncAttempts', async () => {
+    const legacy = makeReport({ id: 'legacy2', syncState: 'pending' });
+    delete (legacy as Partial<LocalMatchReport>).syncAttempts;
+    await db.reports.put(legacy);
+    await markDirtyRetry('legacy2', 'blip');
+    const got = (await listReports()).find((r) => r.id === 'legacy2');
+    expect(got?.syncAttempts).toBe(1);
   });
 });
 

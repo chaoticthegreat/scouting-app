@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Shield, ShieldAlert, Undo2, Flag, Play, FastForward, Timer, Plane, MoveUpRight, Lock, ChevronRight, MapPin } from 'lucide-react';
+import { Shield, ShieldAlert, Undo2, Flag, Play, FastForward, Timer, Plane, MoveUpRight, Lock, ChevronRight, MapPin, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FieldDiagram, type FieldPoint } from '@/components/FieldDiagram';
 import { useCaptureEvents, type DefenseIntervalPayload } from '@/capture/useCaptureEvents';
@@ -222,6 +222,12 @@ function HoldSlideLockButton(props: {
 export function CaptureScreen(props: {
   session: ReturnType<typeof useCaptureSession>;
   onToReview: () => void;
+  /**
+   * Abandon this capture and return to Scout Home. Installed PWAs have no browser
+   * back button, so without this an unfinished capture is a dead end. The draft
+   * auto-saves continuously, so exiting is non-destructive and resumable.
+   */
+  onExit?: () => void;
 }) {
   const s = props.session;
   const [showGo, setShowGo] = useState(false);
@@ -348,13 +354,27 @@ export function CaptureScreen(props: {
   if (!placed) {
     return (
       <div className="flex h-[100dvh] flex-col gap-2 overflow-hidden bg-background p-3 text-foreground">
-        <header className="flex shrink-0 items-center justify-between gap-3">
+        <header className="flex shrink-0 items-center justify-between gap-2">
           <span className="flex items-center gap-2 text-base font-semibold">
             <MapPin className="size-5" /> Place the robot
           </span>
-          <span className="max-w-[9.5rem] text-right text-xs text-muted-foreground">
-            {isPortrait ? 'Turn phone sideways · tap the start spot' : 'Tap the field where it starts'}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="max-w-[8.5rem] text-right text-xs text-muted-foreground">
+              {isPortrait ? 'Turn phone sideways · tap the start spot' : 'Tap the field where it starts'}
+            </span>
+            {props.onExit && (
+              <Button
+                data-testid="capture-exit"
+                variant="outline"
+                size="icon"
+                className="size-11 shrink-0"
+                aria-label="Exit capture"
+                onClick={props.onExit}
+              >
+                <X className="size-5" />
+              </Button>
+            )}
+          </div>
         </header>
         {/* The field fills all remaining height. In portrait it is rotated 90°
             (tall + big); the scout turns the phone sideways to view it upright. */}
@@ -467,6 +487,18 @@ export function CaptureScreen(props: {
         >
           <Undo2 className="size-5" />
         </Button>
+        {props.onExit && (
+          <Button
+            data-testid="capture-exit"
+            variant="outline"
+            size="icon"
+            className="size-11 shrink-0"
+            aria-label="Exit capture"
+            onClick={props.onExit}
+          >
+            <X className="size-5" />
+          </Button>
+        )}
       </header>
 
       {/* Body fills the remaining height; the defense + slider regions flex to

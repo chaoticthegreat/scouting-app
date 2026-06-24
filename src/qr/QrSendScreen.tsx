@@ -5,6 +5,7 @@ import { getSyncQueue } from '@/db/localStore';
 import { toUpsertPayload } from '@/sync/mapReport';
 import { buildFrames, frameToString, type QrFrame } from '@/qr/envelope';
 import { QR_FRAME_MS } from '@/sync/constants';
+import { BackLink } from '@/components/ui/BackLink';
 
 // Animated QR sender (contracts §6/§7). Loads the unsynced backlog, chunks it
 // into envelope frames, and cycles through them as scannable QR images at the
@@ -77,7 +78,10 @@ export default function QrSendScreen() {
       className="flex min-h-screen flex-col items-center gap-6 bg-background p-4 text-foreground"
     >
       <header className="w-full">
-        <h1 className="text-2xl font-bold">Send over QR</h1>
+        <div className="flex items-center gap-3">
+          <BackLink to="/scout" label="Back" icon="back" />
+          <h1 className="text-2xl font-bold">Send over QR</h1>
+        </div>
         <p className="text-sm text-muted-foreground">
           Point the receiving device&apos;s camera at the code. Keep this screen open until the
           receiver shows it has all frames.

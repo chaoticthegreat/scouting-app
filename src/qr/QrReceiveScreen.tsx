@@ -3,6 +3,7 @@ import { BrowserQRCodeReader } from '@zxing/browser';
 import { Camera, CameraOff, CheckCircle2 } from 'lucide-react';
 import { FrameAccumulator, parseFrame } from '@/qr/envelope';
 import { postIngest } from '@/qr/ingestClient';
+import { BackLink } from '@/components/ui/BackLink';
 
 type Phase = 'scanning' | 'ingesting' | 'done' | 'error';
 
@@ -148,6 +149,7 @@ export default function QrReceiveScreen() {
       className="flex min-h-screen flex-col bg-background p-4 text-foreground sm:p-6"
     >
       <header className="mb-4 flex items-center gap-3">
+        <BackLink to="/scout" label="Back" icon="back" />
         <Camera className="size-7 shrink-0 text-primary" aria-hidden />
         <div>
           <h1 className="text-xl font-bold leading-tight sm:text-2xl">Receive over QR</h1>

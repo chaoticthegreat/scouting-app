@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Save,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FieldDiagram, type FieldPoint } from '@/components/FieldDiagram';
@@ -31,6 +32,12 @@ const TOTAL_STEPS = STEPS.length;
 export function ReviewScreen(props: {
   session: ReturnType<typeof useCaptureSession>;
   onSaved: (id: string) => void;
+  /**
+   * Leave review and return to Scout Home WITHOUT saving. Back/Next only step
+   * within review; on an installed PWA (no browser back button) this is the only
+   * escape. The draft auto-saves, so exiting is non-destructive and resumable.
+   */
+  onExit?: () => void;
 }) {
   const s = props.session;
   const [step, setStep] = useState(0); // 0-indexed; UI shows step + 1
@@ -68,14 +75,28 @@ export function ReviewScreen(props: {
     <div className="flex h-[100dvh] flex-col gap-2 overflow-hidden bg-background p-3 text-foreground landscape:gap-3 landscape:p-3">
       {/* Stepper / progress */}
       <header className="flex shrink-0 flex-col gap-1.5 landscape:gap-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-xl font-bold landscape:text-2xl">
             <StepIcon className="size-5 text-brand landscape:size-6" />
             Review
           </h2>
-          <span data-testid="review-step" className="text-sm tabular-nums text-muted-foreground">
-            Step {step + 1} of {TOTAL_STEPS}
-          </span>
+          <div className="flex items-center gap-2">
+            <span data-testid="review-step" className="text-sm tabular-nums text-muted-foreground">
+              Step {step + 1} of {TOTAL_STEPS}
+            </span>
+            {props.onExit && (
+              <Button
+                data-testid="review-exit"
+                variant="outline"
+                size="icon"
+                className="size-11 shrink-0"
+                aria-label="Exit review"
+                onClick={props.onExit}
+              >
+                <X className="size-5" />
+              </Button>
+            )}
+          </div>
         </div>
         <p className="text-base font-semibold text-brand landscape:text-lg">{STEP_TITLES[step]}</p>
         <div className="flex gap-1.5">

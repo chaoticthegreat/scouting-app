@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { IconTabs } from '@/components/ui/IconTabs';
+import { BackLink } from '@/components/ui/BackLink';
 import { useActiveEvent } from '@/dash/useActiveEvent';
 import NextMatchView from '@/dash/NextMatchView';
 import TeamView from '@/dash/TeamView';
@@ -75,7 +76,10 @@ export default function DashboardScreen(): JSX.Element {
       className="flex min-h-screen flex-col gap-4 bg-background p-4 text-foreground"
     >
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <div className="flex items-center gap-3">
+          <BackLink to="/" label="Home" icon="home" />
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+        </div>
         <span className="font-mono text-sm text-muted-foreground">{eventKey ?? '—'}</span>
       </header>
 

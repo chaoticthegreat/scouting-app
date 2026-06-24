@@ -40,13 +40,25 @@ function draftTitle(d: CaptureDraft): string {
   return Number.isFinite(teamNum) && teamNum ? `${label} · Team ${teamNum}` : label;
 }
 
-function CaptureFlow(props: { target: CaptureTarget; onDone: () => void }) {
+function CaptureFlow(props: { target: CaptureTarget; onDone: () => void; onExit: () => void }) {
   const session = useCaptureSession(props.target);
   const [stage, setStage] = useState<'live' | 'review'>('live');
   if (stage === 'review') {
-    return <ReviewScreen session={session} onSaved={() => props.onDone()} />;
+    return (
+      <ReviewScreen
+        session={session}
+        onSaved={() => props.onDone()}
+        onExit={props.onExit}
+      />
+    );
   }
-  return <CaptureScreen session={session} onToReview={() => setStage('review')} />;
+  return (
+    <CaptureScreen
+      session={session}
+      onToReview={() => setStage('review')}
+      onExit={props.onExit}
+    />
+  );
 }
 
 // Login-less identity: pick your name from the team roster. Tapping a name binds
@@ -266,6 +278,10 @@ export default function ScoutHome() {
       <CaptureFlow
         target={active}
         onDone={() => {
+          setActive(null);
+          void refreshLocal();
+        }}
+        onExit={() => {
           setActive(null);
           void refreshLocal();
         }}

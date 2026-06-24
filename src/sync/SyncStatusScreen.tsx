@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useSession } from '@/auth/useSession';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { BackLink } from '@/components/ui/BackLink';
 
 export interface CoverageAssignment {
   match_key: string;
@@ -127,7 +128,10 @@ export default function SyncStatusScreen(): JSX.Element {
 
   return (
     <main data-testid="sync-status" className="mx-auto flex max-w-3xl flex-col gap-4 p-4 sm:p-6">
-      <h1 className="text-2xl font-bold">Sync status</h1>
+      <div className="flex items-center gap-3">
+        <BackLink to="/" label="Home" icon="home" />
+        <h1 className="text-2xl font-bold">Sync status</h1>
+      </div>
       <Card>
         <CardHeader>
           <CardTitle className="text-xl">Server coverage</CardTitle>

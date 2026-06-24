@@ -192,6 +192,18 @@ describe('MatchView', () => {
     expect(video.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('puts the activity timelines before the report list (readable alongside the video)', () => {
+    const { getByTestId } = renderView('2026casnv');
+    fireEvent.click(getByTestId('match-item-2026casnv_qm1'));
+
+    const timelines = getByTestId('match-timelines');
+    const detail = getByTestId('match-detail');
+    // Timelines sit above the reports list so they can be read alongside the video.
+    expect(
+      timelines.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('renders the sync control disabled until a video time is known', () => {
     const { getByTestId } = renderView('2026casnv');
     fireEvent.click(getByTestId('match-item-2026casnv_qm1'));

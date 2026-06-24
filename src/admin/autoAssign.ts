@@ -15,7 +15,14 @@ export function slotsForMatch(m: AssignMatch, ownTeam: number): Slot[] {
   for (const station of stations) {
     slots.push({ allianceColor: 'blue', station, targetTeamNumber: m.blueTeams[station - 1] });
   }
-  return slots.filter((s) => s.targetTeamNumber !== ownTeam);
+  // Drop own-team slots and any empty alliance slots (null/NaN team numbers can
+  // appear for events with incomplete schedules — they have no team to scout).
+  return slots.filter(
+    (s) =>
+      s.targetTeamNumber !== ownTeam &&
+      s.targetTeamNumber != null &&
+      Number.isFinite(s.targetTeamNumber),
+  );
 }
 
 export function autoAssign(

@@ -12,6 +12,8 @@ import type { MsrRow } from '@/dash/types';
 export interface AutoRoutinesProps {
   reports: MsrRow[];
   isOurAlliance: boolean;
+  /** The base/own team to omit from OUR alliance overlay. Defaults to OUR_TEAM. */
+  baseTeam?: number;
 }
 
 /** Small, visually-distinct palette for per-team overlay colors. */
@@ -42,7 +44,8 @@ function hasAuto(r: MsrRow): boolean {
  */
 function buildRoutines(
   reports: MsrRow[],
-  isOurAlliance: boolean
+  isOurAlliance: boolean,
+  baseTeam: number
 ): TeamRoutine[] {
   // distinct team numbers, sorted for stable color assignment
   const teams = Array.from(
@@ -51,7 +54,7 @@ function buildRoutines(
 
   const routines: TeamRoutine[] = [];
   for (const teamNumber of teams) {
-    if (isOurAlliance && teamNumber === OUR_TEAM) continue;
+    if (isOurAlliance && teamNumber === baseTeam) continue;
 
     const withAuto = reports.filter(
       (r) => r.target_team_number === teamNumber && hasAuto(r)
@@ -74,8 +77,8 @@ function buildRoutines(
 }
 
 export default function AutoRoutines(props: AutoRoutinesProps): JSX.Element {
-  const { reports, isOurAlliance } = props;
-  const routines = buildRoutines(reports, isOurAlliance);
+  const { reports, isOurAlliance, baseTeam = OUR_TEAM } = props;
+  const routines = buildRoutines(reports, isOurAlliance, baseTeam);
 
   const overlays: RoutineOverlay[] = routines.map((r) => ({
     color: r.color,

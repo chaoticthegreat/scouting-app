@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { autoAssign } from './autoAssign';
 import { publishAssignments } from './setAssignmentsClient';
+import { ensureEventScoutsFromRoster } from './ensureEventScoutsClient';
 import type { AssignMatch, AssignScout, Assignment, AllianceColor } from './types';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,16 @@ export function AssignmentBoard({ eventKey, matches, scouts }: AssignmentBoardPr
   const [published, setPublished] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Effective scout pool. Starts from the per-event `scout` rows passed in, but
+  // freshly imported events have none (those rows are created when a scouter
+  // picks their name on their device). In that case the lead can seed the pool
+  // from the persistent roster on demand, so auto-generate works for any event.
+  const [pool, setPool] = useState<AssignScout[]>(scouts);
+  const [seeding, setSeeding] = useState(false);
+  useEffect(() => {
+    setPool(scouts);
+  }, [scouts]);
+
   const slots = useMemo<Slot[]>(() => {
     const out: Slot[] = [];
     for (const m of matches) {
@@ -42,6 +53,7 @@ export function AssignmentBoard({ eventKey, matches, scouts }: AssignmentBoardPr
       for (const a of teams) {
         a.nums.forEach((team, i) => {
           if (team === OWN_TEAM) return;
+          if (team == null || !Number.isFinite(team)) return; // empty alliance slot
           out.push({
             matchKey: m.matchKey,
             allianceColor: a.color,
@@ -54,8 +66,8 @@ export function AssignmentBoard({ eventKey, matches, scouts }: AssignmentBoardPr
     return out;
   }, [matches]);
 
-  function onAutoGenerate(): void {
-    const result = autoAssign(matches, scouts, {
+  function generateFrom(activePool: AssignScout[]): void {
+    const result = autoAssign(matches, activePool, {
       ownTeam: OWN_TEAM,
       breakEveryN: 6,
       rotatePositions: true,
@@ -68,6 +80,31 @@ export function AssignmentBoard({ eventKey, matches, scouts }: AssignmentBoardPr
     setGenerated(true);
     setPublished(null);
     setError(null);
+  }
+
+  async function onAutoGenerate(): Promise<void> {
+    setError(null);
+    // No per-event scouts checked in yet: seed the pool from the persistent
+    // roster so the lead can assign before anyone has picked their name.
+    if (pool.length === 0) {
+      if (seeding) return;
+      setSeeding(true);
+      try {
+        const seeded = await ensureEventScoutsFromRoster(eventKey);
+        setPool(seeded);
+        if (seeded.length === 0) {
+          setError('No scouters on the roster yet. Add scouters in the Roster tab first.');
+          return;
+        }
+        generateFrom(seeded);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not load scouters.');
+      } finally {
+        setSeeding(false);
+      }
+      return;
+    }
+    generateFrom(pool);
   }
 
   function setSlot(key: string, scoutId: string): void {
@@ -101,9 +138,9 @@ export function AssignmentBoard({ eventKey, matches, scouts }: AssignmentBoardPr
 
   const nameById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const s of scouts) map.set(s.id, s.displayName);
+    for (const s of pool) map.set(s.id, s.displayName);
     return map;
-  }, [scouts]);
+  }, [pool]);
 
   return (
     <Card>
@@ -115,11 +152,11 @@ export function AssignmentBoard({ eventKey, matches, scouts }: AssignmentBoardPr
           <Button
             type="button"
             data-testid="auto-generate-btn"
-            onClick={onAutoGenerate}
-            disabled={matches.length === 0 || scouts.length === 0}
+            onClick={() => void onAutoGenerate()}
+            disabled={matches.length === 0 || seeding}
             className="h-11"
           >
-            Auto-generate
+            {seeding ? 'Loading scouters…' : 'Auto-generate'}
           </Button>
           <Button
             type="button"
@@ -175,7 +212,7 @@ export function AssignmentBoard({ eventKey, matches, scouts }: AssignmentBoardPr
                     aria-label={`Scout for ${s.targetTeamNumber}`}
                   >
                     <option value="">— Unassigned —</option>
-                    {scouts.map((sc) => (
+                    {pool.map((sc) => (
                       <option key={sc.id} value={sc.id}>
                         {sc.displayName}
                       </option>

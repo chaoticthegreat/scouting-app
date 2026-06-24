@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type { LocalMatchReport, CaptureDraft } from './types';
+import { isAuthClassError } from '@/sync/classifyError';
 
 export class ScoutingDb extends Dexie {
   reports!: Table<LocalMatchReport, string>;
@@ -83,6 +84,20 @@ export async function getSyncQueue(): Promise<LocalMatchReport[]> {
 export async function listDeadLetters(): Promise<LocalMatchReport[]> {
   const all = await db.reports.toArray();
   return all.filter((r) => r.syncState === 'error').map(withSyncDefaults);
+}
+
+// Requeue ONLY auth/RLS/ownership-class dead-letters (e.g. the old upsert
+// ownership gate's 42501) back to 'dirty'. Validation-class dead-letters are left
+// alone so a genuinely-bad report does not loop forever. Returns the number
+// requeued so callers can avoid a no-op sync pass. Intended to run at most once
+// per session (guarded by the caller) after a server-side RLS/RPC fix ships.
+export async function requeueAuthClassDeadLetters(): Promise<number> {
+  const dead = await listDeadLetters();
+  const targets = dead.filter((r) => isAuthClassError(r.lastSyncError));
+  for (const r of targets) {
+    await requeueReport(r.id);
+  }
+  return targets.length;
 }
 
 // Reset a dead-letter to 'dirty' for a manual retry.

@@ -26,6 +26,18 @@ describe('slotsForMatch', () => {
     ]);
   });
 
+  it('drops empty alliance slots (null/NaN team numbers)', () => {
+    const m: AssignMatch = {
+      matchKey: '2026caetb_qm1',
+      // e.g. an incomplete schedule where some alliance slots have no team.
+      redTeams: [254, null as unknown as number, 1678],
+      blueTeams: [NaN as unknown as number, 200, 300],
+    };
+    const slots = slotsForMatch(m, 3256);
+    expect(slots.map((s) => s.targetTeamNumber)).toEqual([254, 1678, 200, 300]);
+    expect(slots.every((s) => Number.isFinite(s.targetTeamNumber))).toBe(true);
+  });
+
   it('omits exactly the slot whose targetTeamNumber === ownTeam (3256)', () => {
     const slots = slotsForMatch(m1, 3256);
     expect(slots).toHaveLength(5);

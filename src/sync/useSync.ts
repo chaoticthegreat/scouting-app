@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOnline } from '@/sync/useOnline';
 import { syncOnce } from '@/sync/outbox';
-import { getSyncQueue, listDeadLetters } from '@/db/localStore';
+import { getSyncQueue, listDeadLetters, requeueAuthClassDeadLetters } from '@/db/localStore';
 import { SYNC_POLL_MS } from '@/sync/constants';
 
 export interface UseSyncResult {
@@ -32,6 +32,12 @@ export function useSync(): UseSyncResult {
   // (state updates are async and would let a second run slip through).
   const runningRef = useRef(false);
   const mountedRef = useRef(true);
+  // Auto-requeue auth/RLS-class dead-letters AT MOST ONCE per session. After a
+  // server-side RLS/RPC fix (migration 0012) ships, reports that were wrongly
+  // dead-lettered with a 42501-class error should retry automatically — but only
+  // once, so a still-failing report can't loop. Validation-class dead-letters are
+  // never touched (see requeueAuthClassDeadLetters).
+  const requeuedAuthRef = useRef(false);
 
   const refreshCounts = useCallback(async () => {
     // `queued` = the retry worklist (dirty + pending), which EXCLUDES dead-letters.
@@ -75,6 +81,23 @@ export function useSync(): UseSyncResult {
     if (!online) return;
     void run();
   }, [online, run]);
+
+  // Once per session, the first time we are online: requeue any auth/RLS-class
+  // dead-letters (the wrongly-terminal 42501-class failures the server fix in
+  // migration 0012 now accepts) and drain. Guarded by a ref so it can never loop;
+  // validation-class dead-letters are left untouched by requeueAuthClassDeadLetters.
+  useEffect(() => {
+    if (!online || requeuedAuthRef.current) return;
+    requeuedAuthRef.current = true;
+    void (async () => {
+      const requeued = await requeueAuthClassDeadLetters();
+      if (requeued > 0) {
+        await run();
+      } else {
+        await refreshCounts();
+      }
+    })();
+  }, [online, run, refreshCounts]);
 
   // Periodic poll while online only.
   useEffect(() => {

@@ -173,6 +173,32 @@ describe('useSync', () => {
     expect(syncOnceMock.mock.calls.length).toBeGreaterThan(afterMount);
   });
 
+  it('auto-requeues an auth-class dead-letter once on first online mount, then drains it', async () => {
+    // Wrongly dead-lettered by the old ownership gate (42501-class message).
+    await saveReport(
+      makeReport({
+        id: 'auth-dead',
+        syncState: 'error',
+        lastSyncError: 'not authorized: scout_id not owned by caller',
+      }),
+    );
+    // Genuine validation failure: must stay dead-lettered.
+    await saveReport(
+      makeReport({
+        id: 'val-dead',
+        syncState: 'error',
+        lastSyncError: 'PGRST204: column not found',
+      }),
+    );
+
+    const { result } = renderHook(() => useSync());
+
+    // The auth-class report is requeued (dirty) and drained; the validation one
+    // remains a dead-letter. deadLetters settles at 1.
+    await waitFor(() => expect(result.current.deadLetters).toBe(1));
+    await waitFor(() => expect(syncOnceMock).toHaveBeenCalled());
+  });
+
   it('guards overlapping runs: a syncNow while a run is in flight does not double-run', async () => {
     let resolveRun: (() => void) | undefined;
     syncOnceMock.mockImplementation(

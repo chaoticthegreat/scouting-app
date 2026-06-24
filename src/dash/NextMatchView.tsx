@@ -17,6 +17,9 @@ import {
   useEventTeams,
   useEventEpa,
   useNexusEventStatus,
+  useEventInfo,
+  useTbaRankings,
+  useTeamSeasonStats,
   type MatchRow,
   type TeamRow,
 } from '@/dash/useEventData';
@@ -25,7 +28,11 @@ import { aggregateEvent, type TeamAgg } from '@/dash/aggregate';
 import { formatMatchKey } from '@/lib/formatMatch';
 import { predictMatch, type TeamPrediction } from '@/dash/predict';
 import AutoRoutines from '@/dash/AutoRoutines';
+import EventStream from '@/dash/EventStream';
+import { EventRankSummary, parseTbaRankings } from '@/dash/Leaderboard';
+import SeasonStats from '@/dash/SeasonStats';
 import { OUR_TEAM } from '@/dash/constants';
+import { getStoredBaseTeam } from '@/dash/baseTeamStore';
 import type { MsrRow } from '@/dash/types';
 
 export interface NextMatchViewProps {
@@ -62,14 +69,17 @@ function isUnplayed(m: MatchRow): boolean {
  * whose alliances include 3256. Fall back to the first unplayed qm if 3256 has
  * no scheduled unplayed match.
  */
-export function pickNextMatch(matches: MatchRow[]): MatchRow | null {
+export function pickNextMatch(
+  matches: MatchRow[],
+  baseTeam: number = OUR_TEAM,
+): MatchRow | null {
   const unplayedQms = matches
     .filter((m) => m.comp_level === 'qm' && isUnplayed(m))
     .sort((a, b) => a.match_number - b.match_number);
   if (unplayedQms.length === 0) return null;
 
   const ours = unplayedQms.find(
-    (m) => redTeamsOf(m).includes(OUR_TEAM) || blueTeamsOf(m).includes(OUR_TEAM),
+    (m) => redTeamsOf(m).includes(baseTeam) || blueTeamsOf(m).includes(baseTeam),
   );
   return ours ?? unplayedQms[0];
 }
@@ -220,6 +230,7 @@ interface AllianceColumnProps {
   allTeams: TeamRow[];
   reports: MsrRow[];
   isOurAlliance: boolean;
+  baseTeam: number;
 }
 
 function AllianceColumn({
@@ -231,6 +242,7 @@ function AllianceColumn({
   allTeams,
   reports,
   isOurAlliance,
+  baseTeam,
 }: AllianceColumnProps) {
   return (
     <Card
@@ -263,7 +275,7 @@ function AllianceColumn({
           ))}
         </ul>
         <div className="mt-3">
-          <AutoRoutines reports={reports} isOurAlliance={isOurAlliance} />
+          <AutoRoutines reports={reports} isOurAlliance={isOurAlliance} baseTeam={baseTeam} />
         </div>
       </CardContent>
     </Card>
@@ -324,6 +336,9 @@ function StatusTile({
 }
 
 export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Element {
+  // The base/"our" team — configurable in Setup so the whole view can pivot onto
+  // another team for testing events 3256 isn't registered at. Defaults to 3256.
+  const baseTeam = getStoredBaseTeam();
   const matchesQ = useEventMatches(eventKey);
   const reportsQ = useEventReports(eventKey);
   const teamsQ = useEventTeams(eventKey);
@@ -332,6 +347,22 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
   const nexusQ = useNexusEventStatus?.(eventKey);
   const nexus = nexusQ?.data ?? { status: null, available: false };
   const nexusLive = nexus.available && nexus.status != null;
+
+  // Broadcast-panel data sources (all degrade gracefully; each may be absent in
+  // unit tests that mock useEventData, so guard the optional-call result).
+  const eventInfoQ = useEventInfo?.(eventKey);
+  const eventInfo = eventInfoQ?.data ?? { name: null, webcast: null };
+  const rankingsQ = useTbaRankings?.(eventKey);
+  const rankRows = useMemo(() => parseTbaRankings(rankingsQ?.data), [rankingsQ?.data]);
+  const ourRankRow = rankRows.find((r) => r.teamNumber === OUR_TEAM) ?? null;
+  const seasonQ = useTeamSeasonStats?.(OUR_TEAM, eventKey, matchesQ.data ?? []);
+  const season =
+    seasonQ?.data ?? {
+      worldRank: null,
+      totalEpa: null,
+      epaSource: 'none' as const,
+      seasonRecord: null,
+    };
 
   // User-overridable selection. `null` means "follow the auto-picked next match";
   // once the user picks, we pin to that match_key.
@@ -415,19 +446,27 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
   const heroTime =
     shortTimeMs(heroNexus?.times.estimatedStartTime ?? null) ?? shortTime(match.scheduled_time);
 
-  // Upcoming rail: prefer Nexus' ordered upcoming list, else the schedule.
+  // Upcoming rail: ONLY OUR (3256) upcoming matches — prefer Nexus' ordered list,
+  // else the schedule. (The On-Field/Queuing tiles still reflect the whole field.)
+  const nexusOursUpcoming = (status?.upcoming ?? []).filter(
+    (nm) => nm.redTeams.includes(OUR_TEAM) || nm.blueTeams.includes(OUR_TEAM),
+  );
   const upcoming: Array<{ key: string; label: string; red: number[]; blue: number[]; time: string | null; isOurs: boolean }> =
-    status && status.upcoming.length > 0
-      ? status.upcoming.slice(0, 6).map((nm, i) => ({
+    nexusOursUpcoming.length > 0
+      ? nexusOursUpcoming.slice(0, 6).map((nm, i) => ({
           key: `${nm.label}-${i}`,
           label: nm.label,
           red: nm.redTeams,
           blue: nm.blueTeams,
           time: shortTimeMs(nm.times.estimatedStartTime),
-          isOurs: nm.redTeams.includes(OUR_TEAM) || nm.blueTeams.includes(OUR_TEAM),
+          isOurs: true,
         }))
       : allMatches
-          .filter(isUnplayed)
+          .filter(
+            (m) =>
+              isUnplayed(m) &&
+              (redTeamsOf(m).includes(OUR_TEAM) || blueTeamsOf(m).includes(OUR_TEAM)),
+          )
           .sort((a, b) => a.match_number - b.match_number)
           .slice(0, 6)
           .map((m) => ({
@@ -436,11 +475,44 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
             red: redTeamsOf(m),
             blue: blueTeamsOf(m),
             time: shortTime(m.scheduled_time),
-            isOurs: redTeamsOf(m).includes(OUR_TEAM) || blueTeamsOf(m).includes(OUR_TEAM),
+            isOurs: true,
           }));
 
   return (
     <div data-testid="dash-next" className="flex flex-col gap-4 text-foreground">
+      {/* Event title bar. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2
+          data-testid="dash-next-event-title"
+          className="text-xl font-bold tracking-tight text-foreground"
+        >
+          {eventInfo.name ?? eventKey}
+        </h2>
+        <span className="font-mono text-sm text-muted-foreground">
+          {eventKey} · {OUR_TEAM}
+        </span>
+      </div>
+
+      {/* Broadcast grid: livestream + rankings · leaderboard · OUR next match. */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_1fr_1.1fr]">
+        {/* LEFT — livestream + event/season rankings. */}
+        <div className="flex flex-col gap-4">
+          <EventStream webcast={eventInfo.webcast} />
+          <EventRankSummary row={ourRankRow} teamCount={rankRows.length || null} />
+          <SeasonStats
+            team={OUR_TEAM}
+            worldRank={season.worldRank}
+            totalEpa={season.totalEpa}
+            epaSource={season.epaSource}
+            seasonRecord={season.seasonRecord}
+          />
+        </div>
+
+        {/* CENTER — official TBA leaderboard. */}
+        <Leaderboard rows={rankRows} ourTeam={OUR_TEAM} />
+
+        {/* RIGHT — OUR next-match hero, live field tiles, OUR upcoming rail. */}
+        <div className="flex flex-col gap-4">
       {/* Hero: OUR next match. The match label is the loudest thing on the page. */}
       <Card
         className={cn(
@@ -550,6 +622,8 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
           )}
         </CardContent>
       </Card>
+        </div>
+      </div>
 
       {/* Prediction breakdown — keep the selector + per-team detail + auto routines. */}
       <div className="flex flex-col gap-1">

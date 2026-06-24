@@ -18,6 +18,12 @@ vi.mock('@/dash/useEventData', () => ({
   useEventEpa: (teams: number[], eventKey: string | null, matches?: unknown) =>
     useEventEpaMock(teams, eventKey, matches),
   useNexusEventStatus: (eventKey: string | null) => useNexusEventStatusMock(eventKey),
+  // Broadcast-panel hooks: static safe defaults (their own units cover them).
+  useEventInfo: () => ({ data: { name: null, webcast: null } }),
+  useTbaRankings: () => ({ data: undefined }),
+  useTeamSeasonStats: () => ({
+    data: { worldRank: null, totalEpa: null, epaSource: 'none', seasonRecord: null },
+  }),
 }));
 
 // --- stub AutoRoutines to keep this focused on prediction rendering ---

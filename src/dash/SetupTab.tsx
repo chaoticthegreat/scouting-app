@@ -2,15 +2,17 @@
 // persists and "stays"), and assign scouters. Folds the old /admin page in.
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Star } from 'lucide-react';
+import { CheckCircle2, Star, Radio } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { EventSetup } from '@/admin/EventSetup';
 import { ScheduleView } from '@/admin/ScheduleView';
 import { AssignmentBoard } from '@/admin/AssignmentBoard';
 import type { AssignMatch, AssignScout } from '@/admin/types';
 import { useActiveEvent } from '@/dash/useActiveEvent';
 import { setActiveEvent } from '@/dash/setActiveEvent';
+import { getStoredNexusEventKey, setStoredNexusEventKey } from '@/dash/nexusEventStore';
 
 interface MatchRow {
   match_key: string;
@@ -35,6 +37,19 @@ export default function SetupTab(): JSX.Element {
   const [scouts, setScouts] = useState<AssignScout[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nexusInput, setNexusInput] = useState(() => getStoredNexusEventKey() ?? '');
+  const [nexusStored, setNexusStored] = useState<string | null>(() => getStoredNexusEventKey());
+
+  const saveNexusEvent = useCallback(() => {
+    setStoredNexusEventKey(nexusInput);
+    setNexusStored(getStoredNexusEventKey());
+  }, [nexusInput]);
+
+  const clearNexusEvent = useCallback(() => {
+    setStoredNexusEventKey(null);
+    setNexusInput('');
+    setNexusStored(null);
+  }, []);
 
   const loadEventData = useCallback(async (key: string) => {
     const [matchRes, scoutRes] = await Promise.all([
@@ -84,6 +99,42 @@ export default function SetupTab(): JSX.Element {
           {activeEvent ?? '— none —'}
         </span>
         {activeEvent && <CheckCircle2 className="size-5 text-green-500" />}
+      </div>
+
+      {/* Optional DEMO Nexus event override — only affects the live field-status feed. */}
+      <div
+        data-testid="setup-nexus-event"
+        className="flex flex-col gap-2 rounded-lg border border-border p-3"
+      >
+        <div className="flex items-center gap-2">
+          <Radio className="size-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Demo Nexus event id (live data testing)</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          When set, the live Nexus field-status feed uses this event id instead of the active
+          event — useful for testing live data against a demo event such as a Nexus demo event.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            data-testid="setup-nexus-event-input"
+            className="max-w-xs font-mono"
+            placeholder="e.g. 2026demo"
+            value={nexusInput}
+            onChange={(e) => setNexusInput(e.target.value)}
+          />
+          <Button data-testid="setup-nexus-event-save" variant="outline" onClick={saveNexusEvent}>
+            Save
+          </Button>
+          <Button data-testid="setup-nexus-event-clear" variant="ghost" onClick={clearNexusEvent}>
+            Clear
+          </Button>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Currently:{' '}
+          <span data-testid="setup-nexus-event-current" className="font-mono">
+            {nexusStored ?? '— none —'}
+          </span>
+        </div>
       </div>
 
       {/* Import an event; on success make it the active event so it persists. */}

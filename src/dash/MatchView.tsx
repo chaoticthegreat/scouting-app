@@ -349,9 +349,10 @@ export default function MatchView(props: MatchViewProps): JSX.Element {
           <div ref={detailRef} className="flex scroll-mt-4 flex-col gap-4">
             {selected != null ? (
               <>
-                {/* Video on top, reports below — stacked. Sits in the main pane
-                    so it's visible the moment a match is picked, no scrolling
-                    past the match list. */}
+                {/* Video on top, activity timelines next (so they can be read
+                    alongside the video), reports below — stacked. Sits in the
+                    main pane so it's visible the moment a match is picked, no
+                    scrolling past the match list. */}
                 <div
                   data-testid="match-detail-grid"
                   className="flex flex-col items-stretch gap-4"
@@ -366,15 +367,15 @@ export default function MatchView(props: MatchViewProps): JSX.Element {
                     }}
                     onResetSync={() => setOffsetSeconds(0)}
                   />
+                  {selectedReports.length > 0 ? (
+                    <MatchTimelines reports={selectedReports} currentTimeMs={currentTimeMs} />
+                  ) : null}
                   <MatchDetail
                     reports={selectedReports}
                     scoutName={scoutName}
                     onOpenReport={setOpenReport}
                   />
                 </div>
-                {selectedReports.length > 0 ? (
-                  <MatchTimelines reports={selectedReports} currentTimeMs={currentTimeMs} />
-                ) : null}
               </>
             ) : (
               <div data-testid="match-prompt" className="text-sm text-muted-foreground">

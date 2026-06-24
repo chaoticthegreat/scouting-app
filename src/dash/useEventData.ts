@@ -6,6 +6,12 @@ import {
   parseNexusEventStatus,
   type NexusEventStatus,
 } from '@/dash/nexusClient';
+import {
+  parseStatboticsTeamYear,
+  inHouseEpaForTeam,
+  type EpaSource,
+} from '@/dash/SeasonStats';
+import type { EventWebcast } from '@/dash/EventStream';
 import type { MsrRow } from '@/dash/types';
 
 const STALE_TIME = 60_000;
@@ -206,8 +212,13 @@ export function useEventEpa(
           epaByTeam.set(team, null);
           continue;
         }
-        anyAvailable = true;
-        epaByTeam.set(team, epaFromTeamEvent(json));
+        const value = epaFromTeamEvent(json);
+        epaByTeam.set(team, value);
+        // Count Statbotics as "available" ONLY when it yields a REAL number. A 200
+        // response with no usable EPA (e.g. an off-season / not-yet-played event)
+        // must fall through to the local (TBA-derived) estimate below — otherwise
+        // every team shows "—" even though we could compute EPA from results.
+        if (value != null) anyAvailable = true;
       }
 
       if (anyAvailable) {
@@ -259,6 +270,127 @@ export function useNexusEventStatus(
         return { status: null, available: false };
       }
       return { status: parseNexusEventStatus(json), available: true };
+    },
+  });
+}
+
+/** Parsed TBA event header info: display name + first usable webcast. */
+export interface EventInfo {
+  name: string | null;
+  webcast: EventWebcast | null;
+}
+
+/** Pull the first webcast (youtube/twitch first) off a TBA event object. */
+function firstWebcast(data: unknown): EventWebcast | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const raw = (data as { webcasts?: unknown }).webcasts;
+  if (!Array.isArray(raw)) return null;
+  const parsed: EventWebcast[] = [];
+  for (const w of raw) {
+    if (typeof w !== 'object' || w === null) continue;
+    const type = (w as { type?: unknown }).type;
+    if (typeof type !== 'string' || !type) continue;
+    const channel = (w as { channel?: unknown }).channel;
+    const file = (w as { file?: unknown }).file;
+    parsed.push({
+      type,
+      channel: typeof channel === 'string' ? channel : null,
+      file: typeof file === 'string' ? file : null,
+    });
+  }
+  if (parsed.length === 0) return null;
+  // Prefer an embeddable youtube/twitch stream over other types.
+  return (
+    parsed.find((w) => w.type === 'youtube' || w.type === 'twitch') ?? parsed[0]
+  );
+}
+
+/**
+ * TBA event header (name + livestream webcast) for the broadcast dashboard.
+ * Degrades to `{ name: null, webcast: null }` if TBA is unreachable.
+ */
+export function useEventInfo(eventKey: string | null): UseQueryResult<EventInfo> {
+  return useQuery({
+    queryKey: ['tba', 'event-info', eventKey],
+    enabled: !!eventKey,
+    staleTime: STALE_TIME,
+    queryFn: async (): Promise<EventInfo> => {
+      try {
+        const data = await tbaGet<{ name?: string }>(`/event/${eventKey}`);
+        const name = typeof data?.name === 'string' ? data.name : null;
+        return { name, webcast: firstWebcast(data) };
+      } catch {
+        return { name: null, webcast: null };
+      }
+    },
+  });
+}
+
+/** Season-level stats for OUR team: Statbotics world rank/EPA with in-house fallback. */
+export interface TeamSeasonStats {
+  worldRank: number | null;
+  totalEpa: number | null;
+  epaSource: EpaSource;
+  seasonRecord: string | null;
+}
+
+/**
+ * Season EPA + world rank for a single team from Statbotics
+ * (`/team_year/{team}/{year}`, year derived from the event key). When Statbotics
+ * is down OR has no EPA for the team, falls back to the in-house EPA computed
+ * from this event's played match results (TBA-derived) and flags the source as
+ * 'inhouse' so the UI can label it. `source` is 'none' when neither yields a value.
+ */
+export function useTeamSeasonStats(
+  team: number,
+  eventKey: string | null,
+  matches: MatchRow[] = [],
+): UseQueryResult<TeamSeasonStats> {
+  const year = eventKey ? eventKey.slice(0, 4) : '';
+  const matchesSig = matches
+    .filter((m) => m.actual_red_score != null && m.actual_blue_score != null)
+    .map((m) => `${m.match_key}:${m.actual_red_score}-${m.actual_blue_score}`)
+    .join(',');
+  return useQuery({
+    queryKey: ['statbotics', 'team-year', team, year, matchesSig],
+    enabled: !!eventKey && team > 0,
+    staleTime: STALE_TIME,
+    queryFn: async (): Promise<TeamSeasonStats> => {
+      const json = await statboticsGet<unknown>(`/team_year/${team}/${year}`);
+      const unavailable =
+        typeof json === 'object' &&
+        json !== null &&
+        (json as { available?: unknown }).available === false;
+      const sb = unavailable
+        ? { worldRank: null, totalEpa: null, record: null }
+        : parseStatboticsTeamYear(json);
+
+      if (sb.totalEpa != null) {
+        return {
+          worldRank: sb.worldRank,
+          totalEpa: sb.totalEpa,
+          epaSource: 'statbotics',
+          seasonRecord: sb.record,
+        };
+      }
+
+      // Statbotics EPA missing -> surface the in-house (TBA-derived) estimate.
+      const local = inHouseEpaForTeam(matches, team);
+      if (local != null) {
+        return {
+          worldRank: sb.worldRank,
+          totalEpa: local,
+          epaSource: 'inhouse',
+          seasonRecord: sb.record,
+        };
+      }
+
+      return {
+        worldRank: sb.worldRank,
+        totalEpa: null,
+        epaSource: 'none',
+        seasonRecord: sb.record,
+      };
     },
   });
 }

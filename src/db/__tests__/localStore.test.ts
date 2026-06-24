@@ -16,6 +16,7 @@ import {
   getSyncQueue,
   listDeadLetters,
   requeueReport,
+  requeueAuthClassDeadLetters,
   saveDraft,
   getDraft,
   listDrafts,
@@ -220,6 +221,43 @@ describe('STORE sync queue helpers', () => {
     expect(got?.syncState).toBe('dirty');
     expect(got?.syncAttempts).toBe(0);
     expect(got?.lastSyncError).toBeNull();
+  });
+
+  it('requeueAuthClassDeadLetters requeues only auth/RLS-class dead-letters', async () => {
+    // Auth-class (the old ownership gate): should be requeued.
+    await saveReport(
+      makeReport({
+        id: 'auth-dead',
+        syncState: 'error',
+        syncAttempts: 3,
+        lastSyncError: 'not authorized: scout_id not owned by caller',
+      }),
+    );
+    // Validation-class: must stay dead-lettered.
+    await saveReport(
+      makeReport({
+        id: 'validation-dead',
+        syncState: 'error',
+        syncAttempts: 1,
+        lastSyncError: 'PGRST204: column not found',
+      }),
+    );
+    // Already healthy: untouched.
+    await saveReport(makeReport({ id: 'ok', syncState: 'synced' }));
+
+    const count = await requeueAuthClassDeadLetters();
+    expect(count).toBe(1);
+
+    const reports = await listReports();
+    const byId = (id: string) => reports.find((r) => r.id === id);
+    expect(byId('auth-dead')?.syncState).toBe('dirty');
+    expect(byId('auth-dead')?.syncAttempts).toBe(0);
+    expect(byId('auth-dead')?.lastSyncError).toBeNull();
+    expect(byId('validation-dead')?.syncState).toBe('error');
+    expect(byId('ok')?.syncState).toBe('synced');
+
+    // Idempotent: a second pass finds nothing left to requeue.
+    expect(await requeueAuthClassDeadLetters()).toBe(0);
   });
 
   it('reads default missing rowRevision/syncAttempts/lastSyncError', async () => {

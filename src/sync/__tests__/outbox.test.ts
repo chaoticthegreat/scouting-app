@@ -2,7 +2,12 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { LocalMatchReport } from '@/db/types';
 import type { FuelBurst } from '@/scoring';
-import { db, saveReport, listReports } from '@/db/localStore';
+import {
+  db,
+  saveReport,
+  listReports,
+  requeueAuthClassDeadLetters,
+} from '@/db/localStore';
 import { SYNC_MAX_ATTEMPTS } from '@/sync/constants';
 import { syncOnce } from '../outbox';
 
@@ -154,6 +159,37 @@ describe('syncOnce', () => {
 
     expect(summary).toEqual({ attempted: 0, synced: 0, retried: 0, deadLettered: 0 });
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('recovery: an auth-class (42501) dead-letter requeues and syncs after the server fix', async () => {
+    // A report wrongly dead-lettered by the OLD ownership gate (SQLSTATE 42501).
+    await saveReport(
+      makeReport({
+        id: 'recover1',
+        syncState: 'error',
+        syncAttempts: 3,
+        lastSyncError: 'not authorized: scout_id not owned by caller',
+      }),
+    );
+
+    // Before requeue, syncOnce ignores dead-letters entirely.
+    const noopRpc = vi.fn().mockResolvedValue({ error: null });
+    expect(await syncOnce(noopRpc)).toEqual({
+      attempted: 0,
+      synced: 0,
+      retried: 0,
+      deadLettered: 0,
+    });
+    expect(noopRpc).not.toHaveBeenCalled();
+
+    // The once-per-session auto-requeue pulls the auth-class dead-letter back.
+    expect(await requeueAuthClassDeadLetters()).toBe(1);
+
+    // Now (post-0012 the RPC accepts it) the drain succeeds.
+    const okRpc = vi.fn().mockResolvedValue({ error: null });
+    const summary = await syncOnce(okRpc);
+    expect(summary).toEqual({ attempted: 1, synced: 1, retried: 0, deadLettered: 0 });
+    expect((await getReport('recover1'))?.syncState).toBe('synced');
   });
 
   it('does not touch dead-lettered reports (getSyncQueue excludes error)', async () => {

@@ -77,3 +77,23 @@ export function classifySyncError(err: unknown): SyncErrorKind {
 function isNetworkMessage(message: string): boolean {
   return /failed to fetch|network|load failed|fetch/i.test(message);
 }
+
+/**
+ * Auth / RLS / ownership-class failures — the kind that a deployed RLS or RPC
+ * change (e.g. migration 0012 relaxing the upsert ownership gate) can RESOLVE.
+ * Such dead-letters are safe to auto-requeue once after the fix ships; genuine
+ * validation failures (bad payload, type errors) are NOT in this set and stay
+ * dead-lettered. Matched against the stored `lastSyncError` message string.
+ *
+ *   42501 → insufficient_privilege (Postgres / the old ownership raise)
+ *   28000 → invalid_authorization (not authenticated)
+ *   401 / 403 → HTTP auth/forbidden
+ *   PGRST301 → JWT/role permission errors from PostgREST
+ *   "not authorized" / "not authenticated" → the RPC's own raise messages
+ */
+const AUTH_CLASS = /\b(42501|28000|401|403|PGRST301)\b|not authoriz|not authenticat|permission denied|insufficient_privilege/i;
+
+export function isAuthClassError(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return AUTH_CLASS.test(message);
+}

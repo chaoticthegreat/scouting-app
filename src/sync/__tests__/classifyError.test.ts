@@ -1,6 +1,6 @@
 // src/sync/__tests__/classifyError.test.ts
 import { describe, it, expect } from 'vitest';
-import { classifySyncError } from '../classifyError';
+import { classifySyncError, isAuthClassError } from '../classifyError';
 
 describe('classifySyncError', () => {
   describe('transient (→ retry with backoff)', () => {
@@ -74,5 +74,28 @@ describe('classifySyncError', () => {
     it('classifies a string 4xx code (other than 408/429) as terminal', () => {
       expect(classifySyncError({ code: '404' })).toBe('terminal');
     });
+  });
+});
+
+describe('isAuthClassError', () => {
+  it('matches the ownership-gate 42501 message', () => {
+    expect(isAuthClassError('42501: permission denied')).toBe(true);
+    expect(isAuthClassError('not authorized: scout_id not owned by caller')).toBe(true);
+    expect(isAuthClassError('insufficient_privilege')).toBe(true);
+  });
+
+  it('matches HTTP 401/403 and PGRST301 auth errors', () => {
+    expect(isAuthClassError('Ingest failed (401)')).toBe(true);
+    expect(isAuthClassError('403 Forbidden')).toBe(true);
+    expect(isAuthClassError('PGRST301: JWT expired')).toBe(true);
+  });
+
+  it('does NOT match validation / network / empty messages', () => {
+    expect(isAuthClassError('PGRST204: column not found')).toBe(false);
+    expect(isAuthClassError('Failed to fetch')).toBe(false);
+    expect(isAuthClassError('invalid input syntax for type integer')).toBe(false);
+    expect(isAuthClassError(null)).toBe(false);
+    expect(isAuthClassError(undefined)).toBe(false);
+    expect(isAuthClassError('')).toBe(false);
   });
 });

@@ -102,8 +102,8 @@ export default function SetupTab(): JSX.Element {
   }, [activeEvent, loadEventData]);
 
   // All already-imported events, so the lead can switch the active one WITHOUT
-  // re-importing (re-import is admin-gated; switching only flips is_active, which
-  // the open `event_update_open` RLS policy permits for anon).
+  // re-importing: switching only flips is_active, which the open
+  // `event_update_open` RLS policy permits for anon.
   const loadEvents = useCallback(async () => {
     const { data } = await supabase
       .from('event')
@@ -157,8 +157,7 @@ export default function SetupTab(): JSX.Element {
           <span className="text-sm font-medium">Switch event</span>
         </div>
         <p className="text-xs text-muted-foreground">
-          Pick any imported event to make it active. Importing a brand-new event (below)
-          still requires a lead/admin.
+          Pick any imported event to make it active, or import a new one below.
         </p>
         {events.length === 0 ? (
           <p className="text-sm text-muted-foreground">No events imported yet.</p>

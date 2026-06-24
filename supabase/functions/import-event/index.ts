@@ -1,8 +1,9 @@
 // supabase/functions/import-event/index.ts
-// Admin-gated TBA import. Verifies the caller is an admin (rpc is_admin via the
-// caller's JWT), fetches TBA event/teams/matches, filters to comp_level==='qm',
-// and upserts event/team/event_team/match using a service-role client. Ensures
-// the event has an 8-char join_code. Idempotent (all writes are upserts).
+// Open (login-less) TBA import, matching the rest of the app's open posture: any
+// caller may import a public TBA event. Fetches TBA event/teams/matches, filters
+// to comp_level==='qm', and upserts event/team/event_team/match using a
+// service-role client. Ensures the event has an 8-char join_code. Idempotent
+// (all writes are upserts). It only ingests public TBA data into our own DB.
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -10,7 +11,6 @@ const TBA_BASE = "https://www.thebluealliance.com/api/v3";
 const TBA_API_KEY = Deno.env.get("TBA_API_KEY") ?? "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
 interface TbaEvent {
   name: string;
@@ -82,17 +82,7 @@ Deno.serve(async (req) => {
     return json({ error: "function not configured" }, 500);
   }
 
-  // (1) Admin gate: build a client bound to the caller's JWT and call is_admin().
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const caller = createClient(SUPABASE_URL, ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data: isAdmin, error: adminErr } = await caller.rpc("is_admin");
-  if (adminErr || isAdmin !== true) {
-    return json({ error: "forbidden: admin only" }, 403);
-  }
-
+  // Open posture: no admin gate. Anyone may import a public TBA event into our DB.
   let body: { event_key?: string };
   try {
     body = await req.json();

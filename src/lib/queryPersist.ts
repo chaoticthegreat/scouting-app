@@ -19,6 +19,13 @@
  * The idb-keyval store name ('frc-react-query') is deliberately distinct from
  * the app's Dexie databases ('scouting-db' / 'pit-scouting-db') so the caches
  * never collide.
+ *
+ * Map/Set round-tripping: the persister serializes with JSON, which turns a
+ * `Map` into `{}` and a `Set` into `{}` — silently dropping their contents and,
+ * worse, their prototype. Query data that holds a Map (e.g. `useEventEpa`'s
+ * `epaByTeam`) would then rehydrate as a plain object after a reload, and the
+ * first `.get()` call throws "epaByTeam.get is not a function". The custom
+ * serialize/deserialize below tag Maps and Sets so they survive the round-trip.
  */
 import { QueryClient } from '@tanstack/react-query';
 import {
@@ -47,6 +54,34 @@ export const queryClient: QueryClient = new QueryClient({
 // Dedicated idb-keyval store so it doesn't collide with the app's Dexie DBs.
 const idbStore = createStore('frc-react-query', 'cache');
 
+// JSON replacer/reviver that preserve Map and Set through the persisted cache.
+// JSON.stringify otherwise collapses both to `{}`, losing contents + prototype.
+const MAP_TAG = '__rq_map__';
+const SET_TAG = '__rq_set__';
+
+function replacer(_key: string, value: unknown): unknown {
+  if (value instanceof Map) {
+    return { [MAP_TAG]: true, value: Array.from(value.entries()) };
+  }
+  if (value instanceof Set) {
+    return { [SET_TAG]: true, value: Array.from(value.values()) };
+  }
+  return value;
+}
+
+function reviver(_key: string, value: unknown): unknown {
+  if (value && typeof value === 'object') {
+    const v = value as Record<string, unknown>;
+    if (v[MAP_TAG] === true && Array.isArray(v.value)) {
+      return new Map(v.value as Iterable<[unknown, unknown]>);
+    }
+    if (v[SET_TAG] === true && Array.isArray(v.value)) {
+      return new Set(v.value as Iterable<unknown>);
+    }
+  }
+  return value;
+}
+
 const persister = createAsyncStoragePersister({
   storage: {
     getItem: (key: string): Promise<string | null> =>
@@ -57,6 +92,8 @@ const persister = createAsyncStoragePersister({
   },
   key: 'frc-rq-cache',
   throttleTime: 1000,
+  serialize: (client) => JSON.stringify(client, replacer),
+  deserialize: (cached) => JSON.parse(cached, reviver),
 });
 
 export const persistOptions: Omit<PersistQueryClientOptions, 'queryClient'> = {

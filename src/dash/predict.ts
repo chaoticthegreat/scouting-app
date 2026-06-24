@@ -73,8 +73,26 @@ function predictTeam(
   return { teamNumber, expected: 0, w: 0, source: 'none' };
 }
 
+/**
+ * Coerce `epaByTeam` to a real Map. A persisted React Query cache from before
+ * Map serialization was handled can rehydrate this as a plain object (or even
+ * `{}`), which lacks `.get`. Tolerate that rather than throwing.
+ */
+function asEpaMap(epaByTeam: PredictInput['epaByTeam']): Map<number, number | null> {
+  if (epaByTeam instanceof Map) return epaByTeam;
+  const m = new Map<number, number | null>();
+  if (epaByTeam && typeof epaByTeam === 'object') {
+    for (const [k, v] of Object.entries(epaByTeam as Record<string, number | null>)) {
+      const team = Number(k);
+      if (Number.isFinite(team)) m.set(team, v);
+    }
+  }
+  return m;
+}
+
 export function predictMatch(input: PredictInput): MatchPrediction {
-  const { redTeams, blueTeams, agg, epaByTeam, statboticsAvailable } = input;
+  const { redTeams, blueTeams, agg, statboticsAvailable } = input;
+  const epaByTeam = asEpaMap(input.epaByTeam);
 
   const redPreds = redTeams.map((t) => predictTeam(t, agg, epaByTeam, statboticsAvailable));
   const bluePreds = blueTeams.map((t) => predictTeam(t, agg, epaByTeam, statboticsAvailable));

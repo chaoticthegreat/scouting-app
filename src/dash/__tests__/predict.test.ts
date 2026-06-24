@@ -276,4 +276,22 @@ describe('predictMatch — robustness', () => {
     expect(CONFIDENCE_N).toBe(4);
     expect(WINPROB_K).toBe(0.08);
   });
+
+  // Regression: a persisted React Query cache from before Map serialization was
+  // handled rehydrates epaByTeam as a plain object, which has no `.get`.
+  // predictMatch must coerce it instead of throwing "epaByTeam.get is not a function".
+  it('tolerates epaByTeam rehydrated as a plain object (corrupt persisted cache)', () => {
+    const input = {
+      redTeams: [1],
+      blueTeams: [],
+      agg: aggMap([agg(1, 2, 30)]),
+      // Plain object, not a Map — string keys as JSON.parse would produce.
+      epaByTeam: { '1': 50 } as unknown as PredictInput['epaByTeam'],
+      statboticsAvailable: true,
+    } as PredictInput;
+    expect(() => predictMatch(input)).not.toThrow();
+    const t = predictMatch(input).red.teams[0];
+    expect(t.source).toBe('blend');
+    expect(t.expected).toBeCloseTo(40, 10); // 0.5*30 + 0.5*50
+  });
 });

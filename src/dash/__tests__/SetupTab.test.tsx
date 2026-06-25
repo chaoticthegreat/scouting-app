@@ -17,6 +17,15 @@ vi.mock('@/dash/deleteEvent', () => ({
   deleteEvent: (...a: unknown[]) => deleteEventMock(...a),
 }));
 
+const enableDemoMock = vi.fn().mockResolvedValue(undefined);
+const disableDemoMock = vi.fn().mockResolvedValue(undefined);
+vi.mock('@/dash/demoEvent', () => ({
+  DEMO_EVENT_KEY: '2026demo',
+  isDemoEvent: (k: string | null) => k === '2026demo',
+  enableDemoMode: (...a: unknown[]) => enableDemoMock(...a),
+  disableDemoMode: (...a: unknown[]) => disableDemoMock(...a),
+}));
+
 // Stub admin children to keep the test focused on SetupTab wiring.
 vi.mock('@/admin/EventSetup', () => ({
   EventSetup: (props: { onImported: (k: string) => void }) => (
@@ -70,6 +79,8 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   setActiveEventMock.mockClear();
   deleteEventMock.mockClear();
+  enableDemoMock.mockClear();
+  disableDemoMock.mockClear();
   store.team = DEFAULT_BASE_TEAM;
 });
 
@@ -115,6 +126,19 @@ describe('SetupTab', () => {
     // Back to the un-armed trash button; nothing deleted.
     expect(screen.getByTestId('setup-delete-2026casnv')).toBeInTheDocument();
     expect(deleteEventMock).not.toHaveBeenCalled();
+  });
+
+  it('shows the enable-demo button when the demo event is not in the list', async () => {
+    render(<SetupTab />, { wrapper });
+    // EVENTS has no 2026demo, so the enable button (not the status) renders.
+    expect(await screen.findByTestId('setup-demo-enable')).toBeInTheDocument();
+    expect(screen.queryByTestId('setup-demo-status')).not.toBeInTheDocument();
+  });
+
+  it('triggers the seed/activate path when enabling demo mode', async () => {
+    render(<SetupTab />, { wrapper });
+    fireEvent.click(await screen.findByTestId('setup-demo-enable'));
+    await waitFor(() => expect(enableDemoMock).toHaveBeenCalledWith(expect.anything()));
   });
 
   it('defaults the base team to 3256', () => {

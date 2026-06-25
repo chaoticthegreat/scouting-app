@@ -92,6 +92,24 @@ Beyond Next Match, the dashboard carries **Team**, **Match**, **Ranking**, and *
 views that aggregate scouting reports into rankings, per-team profiles, and pick-list
 support once data is flowing for an event.
 
+### 7. Demo mode
+
+One toggle in **Setup → Demo mode** spins up a fully-simulated event (`2026demo`) so you can
+explore every feature without a live competition. It seeds ~30 teams (including 3256), a
+60-match qualification schedule with ~70% of matches played and scored, eight scouts, and
+hundreds of realistic scouting + pit reports — so rankings, the next-match prediction, team
+profiles, the match-report compare, and scouter performance all populate immediately. One
+click removes the demo event and all of its data.
+
+The data is generated server-side by an idempotent `seed_demo_event` `SECURITY DEFINER` RPC
+and torn down via `delete_event`, so demo mode never touches your real events.
+
+![Demo mode toggle in Setup](docs/screenshots/demo-setup.png)
+
+![Demo data — full team rankings](docs/screenshots/demo-ranking.png)
+
+![Demo data — team profile with scouting + pit data](docs/screenshots/demo-team.png)
+
 ---
 
 ## Architecture

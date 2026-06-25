@@ -3,7 +3,7 @@
 // built around, and assign scouters. Folds the old /admin page in.
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Users, ArrowLeftRight } from 'lucide-react';
+import { CheckCircle2, Users, ArrowLeftRight, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,7 @@ import { AssignmentBoard } from '@/admin/AssignmentBoard';
 import type { AssignMatch, AssignScout } from '@/admin/types';
 import { useActiveEvent } from '@/dash/useActiveEvent';
 import { setActiveEvent } from '@/dash/setActiveEvent';
+import { deleteEvent } from '@/dash/deleteEvent';
 import {
   getStoredBaseTeam,
   setStoredBaseTeam,
@@ -48,6 +49,10 @@ export default function SetupTab(): JSX.Element {
   const [scouts, setScouts] = useState<AssignScout[]>([]);
   const [events, setEvents] = useState<EventOption[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Two-step delete: first click arms the confirm for one event_key, second
+  // click runs it. `deletingKey` disables the row while the RPC is in flight.
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
 
   // Base team: the team the whole dashboard pivots on (next match, live data,
   // rankings). Defaults to 3256; configurable here so a lead can point the app at
@@ -129,6 +134,27 @@ export default function SetupTab(): JSX.Element {
     [queryClient, loadEvents],
   );
 
+  // Permanently remove an imported event and all of its data. `deleteEvent`
+  // clears the active-event pointer for us if this was the active one; we then
+  // refresh the list and invalidate dependent views.
+  const handleDelete = useCallback(
+    async (key: string) => {
+      setError(null);
+      setDeletingKey(key);
+      try {
+        await deleteEvent(key, queryClient);
+        setConfirmingDelete(null);
+        await loadEvents();
+        void queryClient.invalidateQueries();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete event.');
+      } finally {
+        setDeletingKey(null);
+      }
+    },
+    [queryClient, loadEvents],
+  );
+
   return (
     <div data-testid="setup-tab" className="flex flex-col gap-4">
       {/* Active event. Set automatically when you import an event below; it sticks
@@ -147,17 +173,20 @@ export default function SetupTab(): JSX.Element {
         </p>
       </div>
 
-      {/* Switch the active event among already-imported ones (no re-import). */}
+      {/* Events — switch the active event among already-imported ones (no
+          re-import), delete one you no longer need, or import a new one. Combines
+          the old "Switch event" + "Event Setup" blocks into a single section. */}
       <div
         data-testid="setup-events"
-        className="flex flex-col gap-2 rounded-lg border border-border p-3"
+        className="flex flex-col gap-3 rounded-lg border border-border p-3"
       >
         <div className="flex items-center gap-2">
           <ArrowLeftRight className="size-4 text-brand" />
-          <span className="text-sm font-medium">Switch event</span>
+          <span className="text-sm font-medium">Events</span>
         </div>
         <p className="text-xs text-muted-foreground">
-          Pick any imported event to make it active, or import a new one below.
+          Pick an imported event to make it active, delete one you no longer need,
+          or import a new one below.
         </p>
         {events.length === 0 ? (
           <p className="text-sm text-muted-foreground">No events imported yet.</p>
@@ -165,13 +194,15 @@ export default function SetupTab(): JSX.Element {
           <ul className="flex flex-col gap-2">
             {events.map((ev) => {
               const isActive = ev.event_key === activeEvent;
+              const isConfirming = confirmingDelete === ev.event_key;
+              const isDeleting = deletingKey === ev.event_key;
               return (
-                <li key={ev.event_key}>
+                <li key={ev.event_key} className="flex items-stretch gap-2">
                   <Button
                     data-testid={`setup-switch-${ev.event_key}`}
                     variant={isActive ? 'default' : 'outline'}
-                    className="h-auto w-full justify-between py-2"
-                    disabled={isActive}
+                    className="h-auto min-w-0 flex-1 justify-between py-2"
+                    disabled={isActive || isDeleting}
                     onClick={() => void makeActive(ev.event_key)}
                   >
                     <span className="flex min-w-0 flex-1 flex-col items-start text-left">
@@ -190,11 +221,64 @@ export default function SetupTab(): JSX.Element {
                       <span className="shrink-0 text-xs opacity-70">Set active</span>
                     )}
                   </Button>
+
+                  {isConfirming ? (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        data-testid={`setup-delete-confirm-${ev.event_key}`}
+                        variant="outline"
+                        className="h-auto shrink-0 border-destructive bg-destructive/15 px-3 text-destructive hover:bg-destructive/25"
+                        disabled={isDeleting}
+                        onClick={() => void handleDelete(ev.event_key)}
+                      >
+                        {isDeleting ? 'Deleting…' : 'Delete'}
+                      </Button>
+                      <Button
+                        data-testid={`setup-delete-cancel-${ev.event_key}`}
+                        variant="ghost"
+                        className="h-auto shrink-0 px-3"
+                        disabled={isDeleting}
+                        onClick={() => setConfirmingDelete(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      data-testid={`setup-delete-${ev.event_key}`}
+                      variant="outline"
+                      aria-label={`Delete event ${ev.event_key}`}
+                      className="h-auto shrink-0 px-3 text-muted-foreground hover:border-destructive hover:bg-destructive/15 hover:text-destructive"
+                      onClick={() => {
+                        setError(null);
+                        setConfirmingDelete(ev.event_key);
+                      }}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  )}
                 </li>
               );
             })}
           </ul>
         )}
+        {events.length > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Deleting an event permanently removes it and all of its matches,
+            scouters, and reports.
+          </p>
+        ) : null}
+
+        {/* Import a new event; on success make it the active event so it persists. */}
+        <div className="mt-1 flex flex-col gap-2 border-t border-border pt-3">
+          <span className="text-sm font-medium">Import a new event</span>
+          <EventSetup
+            embedded
+            onImported={(key) => {
+              void makeActive(key);
+            }}
+          />
+        </div>
       </div>
 
       {/* Base team — pivots the whole dashboard (Next Match, live data, rankings). */}
@@ -244,13 +328,6 @@ export default function SetupTab(): JSX.Element {
           </span>
         </div>
       </div>
-
-      {/* Import an event; on success make it the active event so it persists. */}
-      <EventSetup
-        onImported={(key) => {
-          void makeActive(key);
-        }}
-      />
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 

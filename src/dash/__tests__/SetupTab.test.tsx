@@ -12,6 +12,11 @@ vi.mock('@/dash/setActiveEvent', () => ({
   setActiveEvent: (...a: unknown[]) => setActiveEventMock(...a),
 }));
 
+const deleteEventMock = vi.fn().mockResolvedValue(undefined);
+vi.mock('@/dash/deleteEvent', () => ({
+  deleteEvent: (...a: unknown[]) => deleteEventMock(...a),
+}));
+
 // Stub admin children to keep the test focused on SetupTab wiring.
 vi.mock('@/admin/EventSetup', () => ({
   EventSetup: (props: { onImported: (k: string) => void }) => (
@@ -64,6 +69,7 @@ function wrapper({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   setActiveEventMock.mockClear();
+  deleteEventMock.mockClear();
   store.team = DEFAULT_BASE_TEAM;
 });
 
@@ -87,6 +93,28 @@ describe('SetupTab', () => {
     await waitFor(() =>
       expect(setActiveEventMock).toHaveBeenCalledWith('2026caetb', expect.anything()),
     );
+  });
+
+  it('deletes an imported event after a two-step confirm', async () => {
+    render(<SetupTab />, { wrapper });
+    // First click arms the confirm; the event is not yet deleted.
+    const del = await screen.findByTestId('setup-delete-2026caetb');
+    fireEvent.click(del);
+    expect(deleteEventMock).not.toHaveBeenCalled();
+    // Second click (the Delete confirm) runs the removal.
+    fireEvent.click(screen.getByTestId('setup-delete-confirm-2026caetb'));
+    await waitFor(() =>
+      expect(deleteEventMock).toHaveBeenCalledWith('2026caetb', expect.anything()),
+    );
+  });
+
+  it('cancels a delete without removing the event', async () => {
+    render(<SetupTab />, { wrapper });
+    fireEvent.click(await screen.findByTestId('setup-delete-2026casnv'));
+    fireEvent.click(screen.getByTestId('setup-delete-cancel-2026casnv'));
+    // Back to the un-armed trash button; nothing deleted.
+    expect(screen.getByTestId('setup-delete-2026casnv')).toBeInTheDocument();
+    expect(deleteEventMock).not.toHaveBeenCalled();
   });
 
   it('defaults the base team to 3256', () => {

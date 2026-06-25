@@ -1,7 +1,8 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { tbaGet, statboticsGet, nexusGet, epaFromTeamEvent } from '@/dash/proxies';
-import { computeLocalEpa, tbaMatchesToRows } from '@/dash/localEpa';
+import { computeLocalEpa } from '@/dash/localEpa';
+import { fetchSeasonMatchRows, EPA_STALE_TIME } from '@/dash/seasonEpa';
 import {
   parseNexusEventStatus,
   type NexusEventStatus,
@@ -289,7 +290,7 @@ export function useEventEpa(
   return useQuery({
     queryKey: ['epa', eventKey, sortedTeams.join(','), matchesSig],
     enabled: !!eventKey && sortedTeams.length > 0,
-    staleTime: STALE_TIME,
+    staleTime: EPA_STALE_TIME,
     queryFn: async (): Promise<EventEpa> => {
       const epaByTeam = new Map<number, number | null>();
       let anyAvailable = false;
@@ -343,27 +344,28 @@ export function useEventEpa(
 
       // The local `match` table only holds the schedule (the importer never
       // writes scores), so computeLocalEpa above is usually empty in production.
-      // Run the SAME EPA model over real results fetched live from TBA.
-      try {
-        const tbaMatches = await tbaGet<unknown>(`/event/${eventKey}/matches`);
-        const tbaEpa = computeLocalEpa(tbaMatchesToRows(tbaMatches));
-        if (tbaEpa.size > 0) {
-          let anyTba = false;
-          for (const team of sortedTeams) {
-            const v = tbaEpa.get(team);
-            if (v !== undefined) {
-              epaByTeam.set(team, v);
-              anyTba = true;
-            } else {
-              epaByTeam.set(team, null);
-            }
-          }
-          if (anyTba) {
-            return { epaByTeam, available: true, source: 'local' };
+      // Run the SAME EPA model over real results fetched live from TBA — but
+      // SEASON-WIDE: every event the requested teams have attended this season,
+      // not just the current one, so a team's EPA carries forward from earlier
+      // events. fetchSeasonMatchRows never throws (degrades to [] on a TBA
+      // outage), so a failure falls through to 'none' exactly as before.
+      const year = (eventKey as string).slice(0, 4);
+      const seasonRows = await fetchSeasonMatchRows(sortedTeams, eventKey as string, year);
+      const tbaEpa = computeLocalEpa(seasonRows);
+      if (tbaEpa.size > 0) {
+        let anyTba = false;
+        for (const team of sortedTeams) {
+          const v = tbaEpa.get(team);
+          if (v !== undefined) {
+            epaByTeam.set(team, v);
+            anyTba = true;
+          } else {
+            epaByTeam.set(team, null);
           }
         }
-      } catch {
-        /* TBA unavailable too — fall through to 'none' */
+        if (anyTba) {
+          return { epaByTeam, available: true, source: 'local' };
+        }
       }
 
       return { epaByTeam, available: false, source: 'none' };
@@ -477,7 +479,7 @@ export function useTeamSeasonStats(
   return useQuery({
     queryKey: ['statbotics', 'team-year', team, year, matchesSig],
     enabled: !!eventKey && team > 0,
-    staleTime: STALE_TIME,
+    staleTime: EPA_STALE_TIME,
     queryFn: async (): Promise<TeamSeasonStats> => {
       const json = await statboticsGet<unknown>(`/team_year/${team}/${year}`);
       const unavailable =
@@ -513,21 +515,20 @@ export function useTeamSeasonStats(
         return { worldRank: sb.worldRank, totalEpa: localEpa, epaSource: 'inhouse', seasonRecord };
       }
 
-      // EPA fallback: an EVENT-scoped TBA-derived estimate — NOT the team's
-      // cross-event season matches. computeLocalEpa shares each alliance's score
-      // across its three teams; over a single team's season slice the partners
-      // and opponents barely recur, so the residual keeps accruing to the one
-      // ever-present team and its EPA balloons (the "1868 reads way too high"
-      // bug). The full event match set attributes scores correctly — this is the
-      // very same estimate the event-EPA card shows, so the two stay consistent.
-      try {
-        const eventMatches = await tbaGet<unknown>(`/event/${eventKey}/matches`);
-        const tbaEpa = computeLocalEpa(tbaMatchesToRows(eventMatches)).get(team) ?? null;
-        if (tbaEpa != null) {
-          return { worldRank: sb.worldRank, totalEpa: tbaEpa, epaSource: 'inhouse', seasonRecord };
-        }
-      } catch {
-        /* TBA unavailable */
+      // EPA fallback: a SEASON-WIDE TBA-derived estimate. We must NOT run the
+      // model over the team's own cross-event season SLICE — computeLocalEpa
+      // shares each alliance's score across its three teams, so over a single
+      // team's slice the partners/opponents barely recur and the residual keeps
+      // accruing to the one ever-present team, ballooning its EPA (the "1868
+      // reads way too high" bug). Instead we fetch the FULL match set of every
+      // event this team attended this season and run the model over the combined
+      // (complete-alliance) set, so scores attribute correctly AND the team's
+      // EPA carries forward from earlier events. fetchSeasonMatchRows never
+      // throws (degrades to [] on a TBA outage).
+      const seasonRows = await fetchSeasonMatchRows([team], eventKey as string, year);
+      const tbaEpa = computeLocalEpa(seasonRows).get(team) ?? null;
+      if (tbaEpa != null) {
+        return { worldRank: sb.worldRank, totalEpa: tbaEpa, epaSource: 'inhouse', seasonRecord };
       }
 
       return { worldRank: sb.worldRank, totalEpa: null, epaSource: 'none', seasonRecord };

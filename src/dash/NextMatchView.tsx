@@ -338,6 +338,106 @@ function AllianceColumn({
   );
 }
 
+/**
+ * Broadcast win-probability banner: a split red↔blue bar proportional to the
+ * win odds, with both percentages called out boldly and the favored alliance
+ * emphasized. Predicted alliance scores flank the bar for context. This is the
+ * single most important predictive number, so it crowns the alliance columns.
+ */
+function WinProbBanner({
+  redWinProb,
+  redScore,
+  blueScore,
+}: {
+  redWinProb: number;
+  redScore: number;
+  blueScore: number;
+}) {
+  const redProb = Math.min(1, Math.max(0, redWinProb));
+  const blueProb = 1 - redProb;
+  const redFavored = redProb >= blueProb;
+  // Clamp the bar split so the trailing side never fully vanishes (keeps both
+  // colors legible even in a blowout prediction).
+  const redPct = Math.min(92, Math.max(8, Math.round(redProb * 100)));
+
+  return (
+    <div
+      data-testid="dash-next-winprob-banner"
+      className="overflow-hidden rounded-xl border border-border bg-black/40"
+    >
+      <div className="flex items-center justify-between px-4 pt-3">
+        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+          Win Probability
+        </span>
+        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Projected{' '}
+          <span className="tabular-nums font-semibold text-red-400">{round(redScore)}</span>
+          {' – '}
+          <span className="tabular-nums font-semibold text-blue-400">{round(blueScore)}</span>
+        </span>
+      </div>
+
+      {/* Big call-outs: favored side larger + ring; trailing side dimmed. */}
+      <div className="flex items-end justify-between gap-3 px-4 pt-2">
+        <div className="flex flex-col">
+          <span className="text-xs font-semibold uppercase tracking-wider text-red-400/80">
+            Red
+          </span>
+          <span
+            data-testid="dash-next-red-winprob"
+            className={cn(
+              'tabular-nums font-black leading-none text-red-400',
+              redFavored ? 'text-5xl sm:text-6xl' : 'text-3xl sm:text-4xl opacity-70',
+            )}
+          >
+            {pct(redProb)}
+          </span>
+        </div>
+        <div className="flex flex-col items-end">
+          <span className="text-xs font-semibold uppercase tracking-wider text-blue-400/80">
+            Blue
+          </span>
+          <span
+            data-testid="dash-next-blue-winprob"
+            className={cn(
+              'tabular-nums font-black leading-none text-blue-400',
+              !redFavored ? 'text-5xl sm:text-6xl' : 'text-3xl sm:text-4xl opacity-70',
+            )}
+          >
+            {pct(blueProb)}
+          </span>
+        </div>
+      </div>
+
+      {/* The split bar. */}
+      <div className="px-4 pb-4 pt-3">
+        <div className="flex h-4 w-full overflow-hidden rounded-full ring-1 ring-white/10">
+          <div
+            className={cn(
+              'h-full bg-red-500 transition-all',
+              redFavored && 'shadow-[0_0_12px] shadow-red-500/50',
+            )}
+            style={{ width: `${redPct}%` }}
+          />
+          <div
+            className={cn(
+              'h-full flex-1 bg-blue-500 transition-all',
+              !redFavored && 'shadow-[0_0_12px] shadow-blue-500/50',
+            )}
+          />
+        </div>
+        <div className="mt-1.5 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {redFavored ? (
+            <span className="text-red-400">Red favored</span>
+          ) : (
+            <span className="text-blue-400">Blue favored</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Find the Nexus match whose label corresponds to a scheduled MatchRow. */
 function nexusMatchFor(status: NexusEventStatus | null, m: MatchRow | null): NexusMatch | null {
   if (!status || !m) return null;
@@ -666,18 +766,6 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
           <label htmlFor="dash-next-match-select" className="text-sm font-medium text-muted-foreground">
             Prediction for match
           </label>
-          <span className="text-sm text-muted-foreground">
-            Red win{' '}
-            <span
-              data-testid="dash-next-red-winprob"
-              className={cn(
-                'font-bold tabular-nums',
-                pred.redWinProb > 0.5 ? 'text-red-400' : 'text-blue-400',
-              )}
-            >
-              {pct(pred.redWinProb)}
-            </span>
-          </span>
         </div>
         <select
           id="dash-next-match-select"
@@ -714,6 +802,13 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
           Statbotics offline — EPA estimated from this event's results.
         </div>
       ) : null}
+
+      {/* Win-probability banner — crowns the red-vs-blue prediction columns. */}
+      <WinProbBanner
+        redWinProb={pred.redWinProb}
+        redScore={pred.red.score}
+        blueScore={pred.blue.score}
+      />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <AllianceColumn

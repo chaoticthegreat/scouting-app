@@ -291,6 +291,72 @@ describe('NextMatchView', () => {
     expect(numbers).not.toContain(`dash-next-team-${OUR_TEAM}`);
   });
 
+  it('renders the win-prob banner with BOTH red and blue percentages', () => {
+    setupHappyPath(true);
+    const { getByTestId } = render(<NextMatchView eventKey="2026evt" />);
+
+    const banner = getByTestId('dash-next-winprob-banner');
+    expect(banner).toBeTruthy();
+
+    const red = getByTestId('dash-next-red-winprob');
+    const blue = getByTestId('dash-next-blue-winprob');
+    // Both alliances' win probability shown as percentages.
+    expect(red.textContent).toMatch(/%/);
+    expect(blue.textContent).toMatch(/%/);
+
+    // Red% and Blue% are complementary (sum to ~100%).
+    const redPct = parseInt(red.textContent ?? '', 10);
+    const bluePct = parseInt(blue.textContent ?? '', 10);
+    expect(Number.isNaN(redPct)).toBe(false);
+    expect(Number.isNaN(bluePct)).toBe(false);
+    expect(redPct + bluePct).toBe(100);
+  });
+
+  it('shows blue% > 50% for a blue-favored matchup', () => {
+    // Blue alliance scouted with far higher fuel output than red -> blue favored.
+    const matches = [
+      {
+        match_key: '2026evt_qm2',
+        event_key: '2026evt',
+        comp_level: 'qm',
+        match_number: 2,
+        scheduled_time: null,
+        red1: RED[0],
+        red2: RED[1],
+        red3: RED[2],
+        blue1: BLUE[0],
+        blue2: BLUE[1],
+        blue3: BLUE[2],
+        actual_red_score: null,
+        actual_blue_score: null,
+        winner: null,
+        result_synced_at: null,
+      },
+    ];
+    // Red teams: weak. Blue teams: strong. (3256 is unscouted -> 0 from scouting.)
+    const reports: MsrRow[] = [
+      row({ target_team_number: 111, match_key: '2026evt_qm1', fuel_points: 1 }),
+      row({ target_team_number: 222, match_key: '2026evt_qm1', fuel_points: 1 }),
+      row({ target_team_number: 333, match_key: '2026evt_qm1', fuel_points: 90 }),
+      row({ target_team_number: 444, match_key: '2026evt_qm1', fuel_points: 90 }),
+      row({ target_team_number: 555, match_key: '2026evt_qm1', fuel_points: 90 }),
+    ];
+    const teams = [...RED, ...BLUE].map((t) => ({ team_number: t, nickname: null }));
+    const epaByTeam = new Map<number, number | null>();
+    for (const t of [...RED, ...BLUE]) epaByTeam.set(t, null);
+
+    useEventMatchesMock.mockReturnValue(dataResult(matches));
+    useEventReportsMock.mockReturnValue(dataResult(reports));
+    useEventTeamsMock.mockReturnValue(dataResult(teams));
+    useEventEpaMock.mockReturnValue(dataResult({ epaByTeam, available: false }));
+
+    const { getByTestId } = render(<NextMatchView eventKey="2026evt" />);
+    const bluePct = parseInt(getByTestId('dash-next-blue-winprob').textContent ?? '', 10);
+    const redPct = parseInt(getByTestId('dash-next-red-winprob').textContent ?? '', 10);
+    expect(bluePct).toBeGreaterThan(50);
+    expect(redPct).toBeLessThan(50);
+  });
+
   it('shows a live indicator and Nexus-fed upcoming list when Nexus is available', () => {
     setupHappyPath(true);
     useNexusEventStatusMock.mockReturnValue(

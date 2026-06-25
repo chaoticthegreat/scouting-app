@@ -7,9 +7,15 @@ import { Button } from '@/components/ui/button';
 
 export interface EventSetupProps {
   onImported?: (eventKey: string) => void;
+  /**
+   * When true, render just the import form (no surrounding Card/title) so it can
+   * be folded into another block — e.g. the Setup tab's combined Events section.
+   * Defaults to false: the standalone card used by the admin page.
+   */
+  embedded?: boolean;
 }
 
-export function EventSetup({ onImported }: EventSetupProps): JSX.Element {
+export function EventSetup({ onImported, embedded = false }: EventSetupProps): JSX.Element {
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,12 +38,8 @@ export function EventSetup({ onImported }: EventSetupProps): JSX.Element {
     }
   }
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-xl">Event Setup</CardTitle>
-      </CardHeader>
-      <CardContent>
+  const body = (
+    <>
         <form className="flex flex-col gap-4" onSubmit={(e) => void onSubmit(e)}>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="event-key-input-field">TBA event key</Label>
@@ -79,7 +81,18 @@ export function EventSetup({ onImported }: EventSetupProps): JSX.Element {
             </ul>
           </div>
         ) : null}
-      </CardContent>
+    </>
+  );
+
+  // Embedded: caller (Setup tab) supplies the wrapping block + heading.
+  if (embedded) return body;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-xl">Event Setup</CardTitle>
+      </CardHeader>
+      <CardContent>{body}</CardContent>
     </Card>
   );
 }

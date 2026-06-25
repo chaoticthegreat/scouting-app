@@ -36,10 +36,17 @@ export function useActiveEvent(): ActiveEvent {
       }
       const rows = (data ?? []) as EventRow[];
       const next = rows[0]?.event_key ?? null;
+      // Read storage FRESH here rather than closing over the render-time `stored`.
+      // If the active event was just deleted, deleteEvent() has already cleared
+      // localStorage; a refetch fired by invalidateQueries() must then resolve to
+      // null, NOT resurrect the dead key through a stale closure. For a transient
+      // empty server result, storage still holds the good value, so this fallback
+      // still prevents blanking the selection mid-session.
+      const persisted = getStoredActiveEvent();
       // Keep the local cache in step with the server's source of truth, but never
       // erase a known-good local value on a transient empty result.
       if (next) setStoredActiveEvent(next);
-      return next ?? stored ?? null;
+      return next ?? persisted ?? null;
     },
   });
 

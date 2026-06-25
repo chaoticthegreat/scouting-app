@@ -73,6 +73,11 @@ export default function PitScoutFlow({ eventKey, scoutId }: PitScoutFlowProps): 
     );
   }
 
+  const backToPicker = (): void => {
+    setTeam(null);
+    setTeamInput('');
+  };
+
   return (
     <section data-testid="pit-flow" className="flex flex-col gap-3">
       <Button
@@ -80,15 +85,17 @@ export default function PitScoutFlow({ eventKey, scoutId }: PitScoutFlowProps): 
         variant="outline"
         size="big"
         className="w-full gap-2"
-        onClick={() => {
-          setTeam(null);
-          setTeamInput('');
-        }}
+        onClick={backToPicker}
       >
         <Hash className="size-5" />
         Change team (Team {team})
       </Button>
-      <PitScoutScreen eventKey={eventKey} teamNumber={team} scoutId={scoutId} />
+      <PitScoutScreen
+        eventKey={eventKey}
+        teamNumber={team}
+        scoutId={scoutId}
+        onDone={backToPicker}
+      />
     </section>
   );
 }

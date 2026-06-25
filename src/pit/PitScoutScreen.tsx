@@ -8,6 +8,7 @@ import {
   ListChecks,
   Loader2,
   StickyNote,
+  Trash2,
   Wrench,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -17,15 +18,28 @@ import { cn } from '@/lib/utils';
 import {
   savePitDraft,
   getPitDraft,
-  submitPit,
+  enqueuePitReport,
   type PitReport,
 } from './pitStore';
-import { uploadPitPhoto, signedPitPhotoUrl } from './photoUpload';
+import { signedPitPhotoUrl } from './photoUpload';
 
 export interface PitScoutScreenProps {
   eventKey: string;
   teamNumber: number;
   scoutId: string;
+  // Called after a successful submit so the flow can return to the team picker.
+  onDone?: () => void;
+}
+
+// Object URLs (local photo previews) must exist for the <img> to render; jsdom
+// in tests may not implement createObjectURL, so degrade to an empty string
+// rather than throwing.
+function previewFor(file: Blob): string {
+  try {
+    return URL.createObjectURL(file);
+  } catch {
+    return '';
+  }
 }
 
 const DRIVETRAINS = ['', 'swerve', 'tank', 'mecanum', 'west_coast', 'other'];
@@ -74,14 +88,38 @@ export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element 
   const [status, setStatus] = React.useState<'idle' | 'saving' | 'saved' | 'error'>(
     'idle'
   );
-  const [uploading, setUploading] = React.useState(false);
+
+  // The chosen photo is held locally as bytes and uploaded at sync time, so pit
+  // scouting works with zero network. A ref keeps the latest blob available to
+  // the draft-saving `update` closure without re-creating it on every keystroke.
+  const photoRef = React.useRef<Blob | null>(null);
+  const objectUrlRef = React.useRef<string | null>(null);
+
+  function setLocalPreview(file: Blob | null): void {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+    photoRef.current = file;
+    if (file) {
+      const url = previewFor(file);
+      objectUrlRef.current = url || null;
+      setPreviewUrl(url || null);
+    } else {
+      setPreviewUrl(null);
+    }
+  }
 
   React.useEffect(() => {
     let active = true;
     void getPitDraft(props.eventKey, props.teamNumber).then((draft) => {
       if (active && draft) {
         setReport(draft.data);
-        if (draft.data.photoPath) {
+        if (draft.photoBlob) {
+          // A photo captured offline, still pending upload.
+          setLocalPreview(draft.photoBlob);
+        } else if (draft.data.photoPath) {
+          // A previously-uploaded photo: preview via a signed URL.
           void signedPitPhotoUrl(draft.data.photoPath).then((url) => {
             if (active) setPreviewUrl(url);
           });
@@ -91,12 +129,20 @@ export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element 
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.eventKey, props.teamNumber]);
+
+  // Revoke any live object URL on unmount.
+  React.useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    };
+  }, []);
 
   function update(patch: Partial<PitReport>): void {
     setReport((prev) => {
       const next = { ...prev, ...patch };
-      void savePitDraft(props.eventKey, props.teamNumber, next);
+      void savePitDraft(props.eventKey, props.teamNumber, next, photoRef.current);
       return next;
     });
     setStatus('idle');
@@ -108,27 +154,33 @@ export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element 
       : [...list, value];
   }
 
-  async function onPhoto(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+  function onPhoto(e: React.ChangeEvent<HTMLInputElement>): void {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploading(true);
-    try {
-      const path = await uploadPitPhoto(props.eventKey, props.teamNumber, file);
-      const url = await signedPitPhotoUrl(path);
-      setPreviewUrl(url);
-      update({ photoPath: path });
-    } catch {
-      setStatus('error');
-    } finally {
-      setUploading(false);
-    }
+    setLocalPreview(file);
+    // Drop any stale uploaded path; the new blob is the source of truth until
+    // it's uploaded at sync time. update() persists the blob into the draft.
+    update({ photoPath: null });
+  }
+
+  function removePhoto(): void {
+    setLocalPreview(null);
+    update({ photoPath: null });
   }
 
   async function onSubmit(): Promise<void> {
     setStatus('saving');
     try {
-      await submitPit(report);
+      // Queue locally (with the pending photo) and let the sync engine upload
+      // when there's network — works fully offline.
+      await enqueuePitReport(report, photoRef.current);
       setStatus('saved');
+      // Nudge the sync indicator to pick up the new pending upload immediately.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('scout-sync-changed'));
+      }
+      // Back to the team picker to scout the next robot.
+      props.onDone?.();
     } catch {
       setStatus('error');
     }
@@ -293,26 +345,42 @@ export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element 
           <Camera className="size-5 text-muted-foreground" />
           Robot photo
         </Label>
+        {/* The native file input is notoriously unstyleable / clips on mobile, so
+            it's visually hidden and driven by a full-width label button. */}
+        <label
+          htmlFor="pit-photo"
+          className="flex min-h-[56px] w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-input bg-muted px-4 text-base font-medium text-foreground transition-colors active:bg-muted/70"
+        >
+          <Camera className="size-5 shrink-0" />
+          {previewUrl ? 'Replace photo' : 'Add photo'}
+        </label>
         <input
           id="pit-photo"
           data-testid="pit-photo"
           type="file"
           accept="image/*"
           capture="environment"
-          onChange={(e) => void onPhoto(e)}
-          className="w-full max-w-full overflow-hidden min-h-[56px] rounded-xl border border-input bg-transparent p-2 text-base file:mr-3 file:rounded-lg file:border-0 file:bg-muted file:px-4 file:py-2 file:text-sm file:font-medium"
+          onChange={onPhoto}
+          className="sr-only"
         />
-        {uploading && (
-          <p className="flex items-center gap-2 text-sm text-energy">
-            <Loader2 className="size-4 animate-spin" /> Uploading photo…
-          </p>
-        )}
         {previewUrl && (
-          <img
-            src={previewUrl}
-            alt="pit photo preview"
-            className="max-h-64 w-full rounded-xl object-contain"
-          />
+          <div className="flex flex-col gap-2">
+            <img
+              src={previewUrl}
+              alt="pit photo preview"
+              className="max-h-64 w-full rounded-xl object-contain"
+            />
+            <Button
+              type="button"
+              data-testid="pit-photo-remove"
+              variant="outline"
+              size="sm"
+              className="gap-2 self-start"
+              onClick={removePhoto}
+            >
+              <Trash2 className="size-4" /> Remove photo
+            </Button>
+          </div>
         )}
       </div>
 
@@ -321,7 +389,7 @@ export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element 
         variant="brand"
         size="xl"
         className="w-full gap-2"
-        disabled={status === 'saving' || uploading}
+        disabled={status === 'saving'}
         onClick={() => void onSubmit()}
       >
         {status === 'saving' ? (
@@ -340,12 +408,12 @@ export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element 
           data-testid="pit-saved"
           className="flex items-center gap-2 text-base font-medium text-success"
         >
-          <CheckCircle2 className="size-5" /> Saved.
+          <CheckCircle2 className="size-5" /> Saved — queued for upload.
         </p>
       )}
       {status === 'error' && (
         <p data-testid="pit-error" className="text-base font-medium text-destructive">
-          Submit failed — draft kept offline.
+          Couldn’t save — please try again.
         </p>
       )}
     </div>

@@ -4,19 +4,25 @@ import '@testing-library/jest-dom';
 
 const savePitDraft = vi.fn().mockResolvedValue(undefined);
 const getPitDraft = vi.fn().mockResolvedValue(undefined);
-const submitPit = vi.fn().mockResolvedValue(undefined);
-const uploadPitPhoto = vi.fn().mockResolvedValue('2026casj/254/a.jpg');
+const enqueuePitReport = vi.fn().mockResolvedValue(undefined);
 const signedPitPhotoUrl = vi.fn().mockResolvedValue('https://signed/a.jpg');
 
 vi.mock('../pitStore', () => ({
   savePitDraft: (...a: unknown[]) => savePitDraft(...a),
   getPitDraft: (...a: unknown[]) => getPitDraft(...a),
-  submitPit: (...a: unknown[]) => submitPit(...a),
+  enqueuePitReport: (...a: unknown[]) => enqueuePitReport(...a),
 }));
 vi.mock('../photoUpload', () => ({
-  uploadPitPhoto: (...a: unknown[]) => uploadPitPhoto(...a),
   signedPitPhotoUrl: (...a: unknown[]) => signedPitPhotoUrl(...a),
 }));
+
+// jsdom has no Object URL plumbing; stub it so the local photo preview renders.
+if (typeof URL.createObjectURL !== 'function') {
+  URL.createObjectURL = () => 'blob:preview';
+}
+if (typeof URL.revokeObjectURL !== 'function') {
+  URL.revokeObjectURL = () => undefined;
+}
 
 import PitScoutScreen from '../PitScoutScreen';
 
@@ -26,8 +32,7 @@ describe('PitScoutScreen', () => {
   beforeEach(() => {
     savePitDraft.mockClear();
     getPitDraft.mockClear().mockResolvedValue(undefined);
-    submitPit.mockClear().mockResolvedValue(undefined);
-    uploadPitPhoto.mockClear().mockResolvedValue('2026casj/254/a.jpg');
+    enqueuePitReport.mockClear().mockResolvedValue(undefined);
     signedPitPhotoUrl.mockClear().mockResolvedValue('https://signed/a.jpg');
   });
 
@@ -63,39 +68,48 @@ describe('PitScoutScreen', () => {
     expect(screen.getByLabelText(/notes/i)).toHaveValue('resumed');
   });
 
-  it('submits the report and shows a saved indicator', async () => {
-    render(<PitScoutScreen {...props} />);
+  it('queues the report, shows a saved indicator, and calls onDone', async () => {
+    const onDone = vi.fn();
+    render(<PitScoutScreen {...props} onDone={onDone} />);
     fireEvent.change(screen.getByTestId('pit-drivetrain'), {
       target: { value: 'swerve' },
     });
     fireEvent.click(screen.getByTestId('pit-submit'));
-    await waitFor(() => expect(submitPit).toHaveBeenCalledTimes(1));
-    expect(submitPit.mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(enqueuePitReport).toHaveBeenCalledTimes(1));
+    expect(enqueuePitReport.mock.calls[0][0]).toMatchObject({
       eventKey: '2026casj',
       teamNumber: 254,
       drivetrain: 'swerve',
       scoutId: 'scout-1',
     });
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows a saved indicator when no onDone is provided', async () => {
+    render(<PitScoutScreen {...props} />);
+    fireEvent.click(screen.getByTestId('pit-submit'));
     expect(await screen.findByTestId('pit-saved')).toBeInTheDocument();
   });
 
-  it('shows an error indicator when submit fails', async () => {
-    submitPit.mockRejectedValue(new Error('rls'));
+  it('shows an error indicator when queueing fails', async () => {
+    enqueuePitReport.mockRejectedValue(new Error('db'));
     render(<PitScoutScreen {...props} />);
     fireEvent.click(screen.getByTestId('pit-submit'));
     expect(await screen.findByTestId('pit-error')).toBeInTheDocument();
   });
 
-  it('uploads a photo and shows a preview', async () => {
+  it('attaches a photo locally and shows a preview without uploading', async () => {
     render(<PitScoutScreen {...props} />);
     const file = new File(['x'], 'p.jpg', { type: 'image/jpeg' });
     fireEvent.change(screen.getByTestId('pit-photo'), {
       target: { files: [file] },
     });
-    await waitFor(() => expect(uploadPitPhoto).toHaveBeenCalledTimes(1));
-    expect(await screen.findByAltText(/pit photo/i)).toHaveAttribute(
-      'src',
-      'https://signed/a.jpg'
-    );
+    // Preview comes from a local object URL — no network upload at capture time.
+    expect(await screen.findByAltText(/pit photo/i)).toBeInTheDocument();
+    expect(signedPitPhotoUrl).not.toHaveBeenCalled();
+    // The blob is persisted into the draft for offline survival.
+    await waitFor(() => expect(savePitDraft).toHaveBeenCalled());
+    const lastCall = savePitDraft.mock.calls[savePitDraft.mock.calls.length - 1];
+    expect(lastCall[3]).toBeInstanceOf(Blob);
   });
 });

@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useSync } from '@/sync/useSync';
 import { listDeadLetters, requeueReport } from '@/db/localStore';
+import { listPitDeadLetters, requeuePitReport } from '@/pit/pitStore';
 
 export function SyncIndicator(): JSX.Element {
   const { online, queued, deadLetters, syncing, syncNow } = useSync();
@@ -16,9 +17,15 @@ export function SyncIndicator(): JSX.Element {
     if (retrying) return;
     setRetrying(true);
     try {
-      const letters = await listDeadLetters();
+      const [letters, pitLetters] = await Promise.all([
+        listDeadLetters(),
+        listPitDeadLetters(),
+      ]);
       for (const r of letters) {
         await requeueReport(r.id);
+      }
+      for (const r of pitLetters) {
+        await requeuePitReport(r.draftKey);
       }
       // Re-drain the (now larger) queue.
       syncNow();

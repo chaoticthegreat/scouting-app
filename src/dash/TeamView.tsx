@@ -41,7 +41,7 @@ import {
   useTeamSeasonStats,
   type MatchRow,
 } from '@/dash/useEventData';
-import { useTeamPit, type TeamPit } from '@/dash/useTeamPit';
+import { useTeamPit, useTeamPhoto, type TeamPit } from '@/dash/useTeamPit';
 import ReportDetail from '@/dash/ReportDetail';
 import MatchVideo from '@/dash/MatchVideo';
 import TeamTimeline from '@/dash/TeamTimeline';
@@ -378,19 +378,6 @@ function PitPanel(props: { pit: TeamPit | null; isLoading: boolean }): JSX.Eleme
               items={pit.intakeSources}
               testid="team-pit-intake"
             />
-            {pit.photoPath ? (
-              <div className="flex flex-col gap-1.5" data-testid="team-pit-photo">
-                <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-foreground [&_svg]:size-4">
-                  <ImageIcon />
-                  Photo
-                </span>
-                <img
-                  src={pit.photoPath}
-                  alt={`Pit robot for team ${pit.teamNumber}`}
-                  className="max-h-64 w-full rounded-xl border border-border object-contain"
-                />
-              </div>
-            ) : null}
             {pit.notes ? (
               <div className="flex flex-col gap-1.5" data-testid="team-pit-notes">
                 <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-foreground [&_svg]:size-4">
@@ -406,6 +393,37 @@ function PitPanel(props: { pit: TeamPit | null; isLoading: boolean }): JSX.Eleme
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Robot photo for the selected team. Shows the scouted pit photo when one exists
+ * (resolved from its Storage path to a signed URL), otherwise falls back to a
+ * Blue Alliance team-media image for the event's season. Renders nothing when no
+ * photo is available from either source — no placeholder, no broken image.
+ */
+function TeamPhotoCard(props: {
+  eventKey: string;
+  teamNumber: number;
+  pitPhotoPath: string | null;
+}): JSX.Element | null {
+  const { eventKey, teamNumber, pitPhotoPath } = props;
+  const photoQuery = useTeamPhoto(eventKey, teamNumber, pitPhotoPath);
+  const url = photoQuery.data?.url ?? null;
+  const source = photoQuery.data?.source ?? null;
+  if (!url) return null;
+  return (
+    <div className="flex flex-col gap-1.5" data-testid="team-pit-photo">
+      <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-foreground [&_svg]:size-4">
+        <ImageIcon />
+        {source === 'tba' ? 'Photo (TBA)' : 'Photo'}
+      </span>
+      <img
+        src={url}
+        alt={`Robot for team ${teamNumber}`}
+        className="max-h-64 w-full rounded-xl border border-border object-contain"
+      />
+    </div>
   );
 }
 
@@ -485,6 +503,7 @@ function TeamDetail(props: {
   lastMatchNode: JSX.Element | null;
   epaNode: JSX.Element;
   pitNode: JSX.Element;
+  photoNode: JSX.Element | null;
   scoutName: (id: string | null | undefined) => string;
   onOpenReport: (r: MsrRow) => void;
 }): JSX.Element {
@@ -612,6 +631,9 @@ function TeamDetail(props: {
         </CardHeader>
         <CardContent>{props.epaNode}</CardContent>
       </Card>
+
+      {/* Robot photo — scouted pit photo, else a TBA fallback image. */}
+      {props.photoNode}
 
       {/* Pit scouting report */}
       {props.pitNode}
@@ -794,6 +816,18 @@ export default function TeamView(props: TeamViewProps): JSX.Element {
 
   const pitNode = <PitPanel pit={pitQuery.data ?? null} isLoading={pitQuery.isLoading} />;
 
+  // Robot photo for the selected team: scouted pit photo if present, else a TBA
+  // fallback. Shown regardless of whether a pit report exists. Renders nothing
+  // when neither source has an image.
+  const photoNode =
+    selected != null ? (
+      <TeamPhotoCard
+        eventKey={eventKey}
+        teamNumber={selected}
+        pitPhotoPath={pitQuery.data?.photoPath ?? null}
+      />
+    ) : null;
+
   // TBA + last-match nodes only make sense once a team is chosen.
   const tbaNode =
     selected != null ? (
@@ -857,6 +891,7 @@ export default function TeamView(props: TeamViewProps): JSX.Element {
             lastMatchNode={lastMatchNode}
             epaNode={epaNode}
             pitNode={pitNode}
+            photoNode={photoNode}
             scoutName={scoutName}
             onOpenReport={setOpenReport}
           />
@@ -873,6 +908,8 @@ export default function TeamView(props: TeamViewProps): JSX.Element {
             {/* EPA may still be available; show it so the team isn't a dead end. */}
             <div className="mt-3">{epaNode}</div>
           </div>
+          {/* Robot photo — scouted pit photo, else a TBA fallback image. */}
+          {photoNode}
           {/* Pit data may still exist even without match reports. */}
           {pitNode}
         </div>

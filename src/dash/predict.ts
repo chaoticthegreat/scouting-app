@@ -3,7 +3,12 @@
 // Blends OUR scouting expectation with Statbotics EPA, degrading gracefully
 // when Statbotics is down or a team is unknown. Never throws on missing data.
 
-import { CONFIDENCE_N, WINPROB_K } from './constants';
+import {
+  CONFIDENCE_N,
+  WINPROB_SIGMA_FRACTION,
+  WINPROB_SIGMA_FLOOR,
+  WINPROB_LOGIT_SCALE,
+} from './constants';
 import type { TeamAgg } from './aggregate';
 
 export interface TeamPrediction {
@@ -16,7 +21,7 @@ export interface TeamPrediction {
 export interface MatchPrediction {
   red: { teams: TeamPrediction[]; score: number };
   blue: { teams: TeamPrediction[]; score: number };
-  /** logistic(WINPROB_K * (redScore - blueScore)), 0..1 */
+  /** logistic(WINPROB_LOGIT_SCALE * (redScore - blueScore) / sigma), 0..1 */
   redWinProb: number;
   /** 0..1: mean team w, knocked down when Statbotics unavailable */
   confidence: number;
@@ -100,7 +105,11 @@ export function predictMatch(input: PredictInput): MatchPrediction {
   const redScore = redPreds.reduce((s, p) => s + p.expected, 0);
   const blueScore = bluePreds.reduce((s, p) => s + p.expected, 0);
 
-  const redWinProb = 1 / (1 + Math.exp(-WINPROB_K * (redScore - blueScore)));
+  // Scale the margin by an estimated match-margin SD that grows with the total
+  // predicted score, so a given point edge means less in a high-scoring game.
+  const sigma = Math.max(WINPROB_SIGMA_FLOOR, WINPROB_SIGMA_FRACTION * (redScore + blueScore));
+  const z = (WINPROB_LOGIT_SCALE * (redScore - blueScore)) / sigma;
+  const redWinProb = 1 / (1 + Math.exp(-z));
 
   const allPreds = [...redPreds, ...bluePreds];
   const meanW =

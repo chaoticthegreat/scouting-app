@@ -35,6 +35,9 @@ vi.mock('@/dash/useEventData', () => ({
 vi.mock('@/dash/useTeamPit', () => ({
   useTeamPit: (eventKey: string | null, teamNumber: number | null) =>
     useTeamPitMock(eventKey, teamNumber),
+  // The team photo card resolves a pit/TBA image; stub it to "no image" so the
+  // unit test renders without a QueryClient/network.
+  useTeamPhoto: () => ({ data: { url: null, source: null }, isLoading: false }),
 }));
 
 // MatchVideo fetches the TBA match via react-query; stub it so the last-match

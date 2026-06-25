@@ -11,7 +11,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOnline } from '@/sync/useOnline';
 import { syncOnce } from '@/sync/outbox';
+import { syncPitOnce } from '@/sync/pitOutbox';
 import { getSyncQueue, listDeadLetters, requeueAuthClassDeadLetters } from '@/db/localStore';
+import { getPitSyncQueue, listPitDeadLetters } from '@/pit/pitStore';
 import { SYNC_POLL_MS } from '@/sync/constants';
 
 export interface UseSyncResult {
@@ -42,10 +44,16 @@ export function useSync(): UseSyncResult {
   const refreshCounts = useCallback(async () => {
     // `queued` = the retry worklist (dirty + pending), which EXCLUDES dead-letters.
     // Dead-letters are surfaced separately so the badge never double-counts them.
-    const [queue, dead] = await Promise.all([getSyncQueue(), listDeadLetters()]);
+    // Pit reports drain through the same indicator, so their counts are folded in.
+    const [queue, dead, pitQueue, pitDead] = await Promise.all([
+      getSyncQueue(),
+      listDeadLetters(),
+      getPitSyncQueue(),
+      listPitDeadLetters(),
+    ]);
     if (!mountedRef.current) return;
-    setQueued(queue.length);
-    setDeadLetters(dead.length);
+    setQueued(queue.length + pitQueue.length);
+    setDeadLetters(dead.length + pitDead.length);
   }, []);
 
   const run = useCallback(async () => {
@@ -54,6 +62,7 @@ export function useSync(): UseSyncResult {
     if (mountedRef.current) setSyncing(true);
     try {
       await syncOnce();
+      await syncPitOnce();
     } finally {
       await refreshCounts();
       runningRef.current = false;
@@ -97,6 +106,18 @@ export function useSync(): UseSyncResult {
         await refreshCounts();
       }
     })();
+  }, [online, run, refreshCounts]);
+
+  // React immediately when a screen enqueues work (e.g. a pit report submit):
+  // refresh the badge counts right away, and drain now if we're online instead
+  // of waiting up to SYNC_POLL_MS for the next poll.
+  useEffect(() => {
+    function onChanged(): void {
+      if (online) void run();
+      else void refreshCounts();
+    }
+    window.addEventListener('scout-sync-changed', onChanged);
+    return () => window.removeEventListener('scout-sync-changed', onChanged);
   }, [online, run, refreshCounts]);
 
   // Periodic poll while online only.

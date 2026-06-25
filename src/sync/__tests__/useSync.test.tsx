@@ -111,6 +111,9 @@ describe('useSync', () => {
   it('syncNow() invokes syncOnce and refreshes counts', async () => {
     const { result } = renderHook(() => useSync());
     await waitFor(() => expect(syncOnceMock).toHaveBeenCalledTimes(1));
+    // Let the mount run fully settle (it now also drains the pit outbox) so the
+    // overlap guard is clear before we trigger a second run.
+    await waitFor(() => expect(result.current.syncing).toBe(false));
 
     await act(async () => {
       result.current.syncNow();

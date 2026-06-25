@@ -6,7 +6,7 @@ export interface ProxyUnavailable {
   available: false;
 }
 
-function isUnavailable(body: unknown): body is ProxyUnavailable {
+export function isUnavailable(body: unknown): body is ProxyUnavailable {
   return (
     typeof body === 'object' &&
     body !== null &&
@@ -39,6 +39,31 @@ export async function tbaGet<T>(path: string): Promise<T> {
     throw new Error(`tba-proxy request failed (${res.status}) for ${path}`);
   }
   return (await res.json()) as T;
+}
+
+/**
+ * Read through the TBA Edge proxy, but never throws: degrades to
+ * `{ available: false }` on any fetch/non-2xx error or the sentinel body,
+ * so an OPTIONAL TBA lookup (e.g. team media fallback photos) can fail
+ * silently without breaking the dashboard. Use the strict `tbaGet` when a
+ * TBA failure should surface as an error instead.
+ */
+export async function tbaGetOptional<T>(path: string): Promise<T | ProxyUnavailable> {
+  try {
+    const res = await fetch(proxyUrl('tba-proxy', path), {
+      headers: await authHeaders(),
+    });
+    if (!res.ok) {
+      return { available: false };
+    }
+    const body = (await res.json()) as unknown;
+    if (isUnavailable(body)) {
+      return { available: false };
+    }
+    return body as T;
+  } catch {
+    return { available: false };
+  }
 }
 
 /**

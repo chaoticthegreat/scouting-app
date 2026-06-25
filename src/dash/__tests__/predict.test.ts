@@ -1,8 +1,20 @@
 // src/dash/__tests__/predict.test.ts
 import { predictMatch } from '@/dash/predict';
-import { CONFIDENCE_N, WINPROB_K } from '@/dash/constants';
+import {
+  CONFIDENCE_N,
+  WINPROB_SIGMA_FRACTION,
+  WINPROB_SIGMA_FLOOR,
+  WINPROB_LOGIT_SCALE,
+} from '@/dash/constants';
 import type { TeamAgg } from '@/dash/aggregate';
 import type { PredictInput } from '@/dash/predict';
+
+/** Mirror of predict.ts's scale-aware win-prob, for exact-value assertions. */
+function expectedWinProb(redScore: number, blueScore: number): number {
+  const sigma = Math.max(WINPROB_SIGMA_FLOOR, WINPROB_SIGMA_FRACTION * (redScore + blueScore));
+  const z = (WINPROB_LOGIT_SCALE * (redScore - blueScore)) / sigma;
+  return 1 / (1 + Math.exp(-z));
+}
 
 /** Build a TeamAgg stub: only the fields predict reads matter. */
 function agg(teamNumber: number, matchesScouted: number, scoutingExpectedPoints: number): TeamAgg {
@@ -32,7 +44,6 @@ function aggMap(entries: TeamAgg[]): Map<number, TeamAgg> {
   return new Map(entries.map((a) => [a.teamNumber, a]));
 }
 
-const logistic = (x: number) => 1 / (1 + Math.exp(-x));
 
 describe('predictMatch — per-team blend cases', () => {
   it('blends scouting and EPA when both present (w = min(1, m/CONFIDENCE_N))', () => {
@@ -175,7 +186,7 @@ describe('predictMatch — alliance scores & win prob', () => {
     expect(predictMatch(fullInput(true)).redWinProb).toBeCloseTo(0.5, 10);
   });
 
-  it('redWinProb matches the logistic of WINPROB_K*(red-blue) and is monotonic', () => {
+  it('redWinProb matches the scale-aware logistic of the margin and is monotonic', () => {
     const input: PredictInput = {
       redTeams: [1],
       blueTeams: [4],
@@ -186,7 +197,7 @@ describe('predictMatch — alliance scores & win prob', () => {
     const out = predictMatch(input);
     expect(out.red.score).toBeCloseTo(100, 10);
     expect(out.blue.score).toBeCloseTo(40, 10);
-    expect(out.redWinProb).toBeCloseTo(logistic(WINPROB_K * (100 - 40)), 10);
+    expect(out.redWinProb).toBeCloseTo(expectedWinProb(100, 40), 10);
     expect(out.redWinProb).toBeGreaterThan(0.5); // stronger red
 
     // swapping makes blue stronger -> redWinProb < 0.5 and symmetric
@@ -272,9 +283,26 @@ describe('predictMatch — robustness', () => {
     expect(out.red.teams.every((t) => t.source === 'none')).toBe(true);
   });
 
-  it('CONFIDENCE_N and WINPROB_K are the contract values', () => {
+  it('CONFIDENCE_N and the win-prob calibration are the contract values', () => {
     expect(CONFIDENCE_N).toBe(4);
-    expect(WINPROB_K).toBe(0.08);
+    expect(WINPROB_SIGMA_FRACTION).toBe(0.11);
+    expect(WINPROB_SIGMA_FLOOR).toBe(12);
+    expect(WINPROB_LOGIT_SCALE).toBe(1.7);
+  });
+
+  it('a 21-pt margin in a high-scoring game is a near coin-flip, not a lock', () => {
+    // The motivating case: 2026casnv qual 70, ~426 vs ~405. The old fixed-K curve
+    // returned ~84%; the scale-aware curve should be much closer to even.
+    const input: PredictInput = {
+      redTeams: [1],
+      blueTeams: [4],
+      agg: aggMap([agg(1, 4, 426), agg(4, 4, 405)]),
+      epaByTeam: new Map<number, number | null>(),
+      statboticsAvailable: true,
+    };
+    const p = predictMatch(input).redWinProb;
+    expect(p).toBeGreaterThan(0.5);
+    expect(p).toBeLessThan(0.66);
   });
 
   // Regression: a persisted React Query cache from before Map serialization was

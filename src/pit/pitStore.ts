@@ -19,15 +19,46 @@ export interface PitDraft {
   teamNumber: number;
   updatedAt: string;
   data: PitReport;
+  // A photo chosen offline is held as raw bytes in the draft until it can be
+  // uploaded at sync time (Supabase Storage needs the network). `photoPath`
+  // stays null on the report until the blob is uploaded.
+  photoBlob?: Blob | null;
+}
+
+// A pit report that has been SUBMITTED and is queued for upload. Mirrors the
+// match-report sync-state machine (dirty/pending/synced/error) so pit reports
+// survive a dead venue network exactly like match reports do. Keyed by the same
+// `eventKey:teamNumber` draftKey — one report per team per event.
+export type PitSyncState = 'dirty' | 'pending' | 'synced' | 'error';
+
+export interface LocalPitReport {
+  draftKey: string;
+  eventKey: string;
+  teamNumber: number;
+  data: PitReport;
+  // Pending photo bytes to upload before the row upsert. Cleared once uploaded.
+  photoBlob?: Blob | null;
+  syncState: PitSyncState;
+  syncAttempts: number;
+  lastSyncError: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 class PitDb extends Dexie {
   pitDrafts!: Table<PitDraft, string>;
+  pitReports!: Table<LocalPitReport, string>;
 
   constructor() {
     super('pit-scouting-db');
     this.version(1).stores({
       pitDrafts: 'draftKey',
+    });
+    // v2: add the submitted-report outbox so pit reports queue locally and sync
+    // through the same online/offline edge as match reports.
+    this.version(2).stores({
+      pitDrafts: 'draftKey',
+      pitReports: 'draftKey, syncState',
     });
   }
 }
@@ -41,7 +72,8 @@ function pitDraftKey(eventKey: string, teamNumber: number): string {
 export async function savePitDraft(
   eventKey: string,
   teamNumber: number,
-  data: PitReport
+  data: PitReport,
+  photoBlob?: Blob | null
 ): Promise<void> {
   const draft: PitDraft = {
     draftKey: pitDraftKey(eventKey, teamNumber),
@@ -49,6 +81,7 @@ export async function savePitDraft(
     teamNumber,
     updatedAt: new Date().toISOString(),
     data,
+    photoBlob: photoBlob ?? null,
   };
   await pitDb.pitDrafts.put(draft);
 }
@@ -60,25 +93,141 @@ export async function getPitDraft(
   return pitDb.pitDrafts.get(pitDraftKey(eventKey, teamNumber));
 }
 
-export async function submitPit(report: PitReport): Promise<void> {
-  // `pit_scouting_report` has no `intake_sources` column. `capabilities` is a
-  // jsonb column, so the collected capability list and intake sources are
-  // folded into one jsonb object: { items: string[], intakeSources: string[] }.
-  const capabilities = {
-    items: report.capabilities,
-    intakeSources: report.intakeSources,
-  };
-  const { error } = await supabase.from('pit_scouting_report').upsert({
+export async function deletePitDraft(eventKey: string, teamNumber: number): Promise<void> {
+  await pitDb.pitDrafts.delete(pitDraftKey(eventKey, teamNumber));
+}
+
+// The snake_case wire shape for `pit_scouting_report`. `pit_scouting_report` has
+// no `intake_sources` column — `capabilities` is a jsonb column, so the capability
+// list and intake sources are folded into one object:
+// { items: string[], intakeSources: string[] }.
+export function pitUpsertPayload(report: PitReport): Record<string, unknown> {
+  return {
     event_key: report.eventKey,
     team_number: report.teamNumber,
     drivetrain: report.drivetrain,
     mechanisms: report.mechanisms,
-    capabilities,
+    capabilities: {
+      items: report.capabilities,
+      intakeSources: report.intakeSources,
+    },
     photo_path: report.photoPath,
     notes: report.notes,
     author_scout_id: report.scoutId,
-  });
+  };
+}
+
+// Upsert the row, returning the raw Supabase error (or null) WITHOUT throwing so
+// the outbox can classify it (transient vs terminal). `submitPit` wraps this and
+// throws for its existing callers/tests.
+export async function upsertPitRow(report: PitReport): Promise<{ error: unknown }> {
+  const { error } = await supabase.from('pit_scouting_report').upsert(pitUpsertPayload(report));
+  return { error };
+}
+
+export async function submitPit(report: PitReport): Promise<void> {
+  const { error } = await upsertPitRow(report);
   if (error) {
-    throw new Error(error.message);
+    throw new Error((error as { message?: string }).message ?? 'pit upsert failed');
   }
+}
+
+// --- Offline outbox: submitted pit reports queued for upload ----------------
+
+// Enqueue a submitted report to the local outbox as 'dirty'. The matching draft
+// is removed — the queued report now owns the data. Idempotent per team/event:
+// re-submitting overwrites the same draftKey row (one pit report per team).
+export async function enqueuePitReport(
+  report: PitReport,
+  photoBlob?: Blob | null
+): Promise<void> {
+  const draftKey = pitDraftKey(report.eventKey, report.teamNumber);
+  const now = new Date().toISOString();
+  const existing = await pitDb.pitReports.get(draftKey);
+  const record: LocalPitReport = {
+    draftKey,
+    eventKey: report.eventKey,
+    teamNumber: report.teamNumber,
+    data: report,
+    photoBlob: photoBlob ?? null,
+    syncState: 'dirty',
+    syncAttempts: 0,
+    lastSyncError: null,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  await pitDb.pitReports.put(record);
+  await deletePitDraft(report.eventKey, report.teamNumber);
+}
+
+function withPitDefaults(r: LocalPitReport): LocalPitReport {
+  return {
+    ...r,
+    syncAttempts: r.syncAttempts ?? 0,
+    lastSyncError: r.lastSyncError ?? null,
+  };
+}
+
+// Auto-retry worklist: dirty + pending, oldest first; EXCLUDES 'error'/'synced'.
+export async function getPitSyncQueue(): Promise<LocalPitReport[]> {
+  const all = await pitDb.pitReports.toArray();
+  return all
+    .filter((r) => r.syncState === 'dirty' || r.syncState === 'pending')
+    .map(withPitDefaults)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+export async function listPitDeadLetters(): Promise<LocalPitReport[]> {
+  const all = await pitDb.pitReports.toArray();
+  return all.filter((r) => r.syncState === 'error').map(withPitDefaults);
+}
+
+export async function markPitPending(draftKey: string): Promise<void> {
+  await pitDb.pitReports.update(draftKey, { syncState: 'pending' });
+}
+
+// Record a freshly-uploaded photo path and drop the pending blob. Called right
+// after the Storage upload succeeds so a later transient upsert retry does not
+// re-upload the photo (which would orphan the first object).
+export async function setPitUploadedPhoto(draftKey: string, photoPath: string): Promise<void> {
+  const existing = await pitDb.pitReports.get(draftKey);
+  if (!existing) return;
+  await pitDb.pitReports.update(draftKey, {
+    photoBlob: null,
+    data: { ...existing.data, photoPath },
+  });
+}
+
+// Success: record the (now-uploaded) photo path and drop the pending blob.
+export async function markPitSynced(draftKey: string, photoPath: string | null): Promise<void> {
+  const existing = await pitDb.pitReports.get(draftKey);
+  await pitDb.pitReports.update(draftKey, {
+    syncState: 'synced',
+    photoBlob: null,
+    lastSyncError: null,
+    data: existing ? { ...existing.data, photoPath } : undefined,
+  });
+}
+
+export async function markPitDirtyRetry(draftKey: string, message: string): Promise<void> {
+  const existing = await pitDb.pitReports.get(draftKey);
+  const attempts = (existing?.syncAttempts ?? 0) + 1;
+  await pitDb.pitReports.update(draftKey, {
+    syncState: 'dirty',
+    syncAttempts: attempts,
+    lastSyncError: message,
+  });
+}
+
+export async function markPitSyncError(draftKey: string, message: string): Promise<void> {
+  await pitDb.pitReports.update(draftKey, { syncState: 'error', lastSyncError: message });
+}
+
+// Reset a pit dead-letter to 'dirty' for a manual retry.
+export async function requeuePitReport(draftKey: string): Promise<void> {
+  await pitDb.pitReports.update(draftKey, {
+    syncState: 'dirty',
+    syncAttempts: 0,
+    lastSyncError: null,
+  });
 }

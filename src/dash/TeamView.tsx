@@ -24,7 +24,13 @@ import {
   Gauge,
   TrendingUp,
   ListChecks,
+  Eye,
+  BatteryCharging,
+  Ruler,
+  Swords,
+  Route,
 } from 'lucide-react';
+import { FieldDiagram } from '@/components/FieldDiagram';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Sheet } from '@/components/ui/Sheet';
 import { cn } from '@/lib/utils';
@@ -146,6 +152,49 @@ function ChipRow(props: {
       )}
     </div>
   );
+}
+
+/** A labelled inline value row (drivetrain / vision / dimensions). */
+function DetailRow(props: {
+  icon: JSX.Element;
+  label: string;
+  value: string;
+  testid: string;
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-foreground [&_svg]:size-4">
+        {props.icon}
+        {props.label}
+      </span>
+      <span className="text-base font-semibold text-foreground" data-testid={props.testid}>
+        {props.value}
+      </span>
+    </div>
+  );
+}
+
+/** Compact "L × W × H in" string, em-dash when no dimension is known. */
+function dimensionsStr(l: number | null, w: number | null, h: number | null): string {
+  if (l == null && w == null && h == null) return '—';
+  const part = (n: number | null): string => (n == null ? '?' : String(n));
+  return `${part(l)} × ${part(w)} × ${part(h)} in`;
+}
+
+/** Battery / charger inventory summary, em-dash when nothing is known. */
+function batteryStr(
+  count: number | null,
+  chargers: number | null,
+  brand: string | null,
+  connector: string | null,
+): string {
+  const parts: string[] = [];
+  if (count != null) parts.push(`${count} batt`);
+  if (chargers != null) parts.push(`${chargers} charger${chargers === 1 ? '' : 's'}`);
+  const extras = [brand, connector].filter((p): p is string => !!p);
+  const main = parts.join(' · ');
+  if (!main && extras.length === 0) return '—';
+  return extras.length ? `${main || '—'} (${extras.join(', ')})` : main;
 }
 
 /** Format a W-L-T record, or em-dash when no parts are known. */
@@ -378,6 +427,53 @@ function PitPanel(props: { pit: TeamPit | null; isLoading: boolean }): JSX.Eleme
               items={pit.intakeSources}
               testid="team-pit-intake"
             />
+            <ChipRow
+              icon={<Swords />}
+              label="Match strategy"
+              items={pit.matchStrategy}
+              testid="team-pit-strategy"
+            />
+            <DetailRow
+              icon={<Eye />}
+              label="Vision"
+              value={pit.visionSystem ?? '—'}
+              testid="team-pit-vision"
+            />
+            <DetailRow
+              icon={<BatteryCharging />}
+              label="Batteries"
+              value={batteryStr(pit.batteryCount, pit.chargerCount, pit.batteryBrand, pit.batteryConnector)}
+              testid="team-pit-batteries"
+            />
+            <DetailRow
+              icon={<Ruler />}
+              label="Dimensions"
+              value={
+                dimensionsStr(pit.robotLengthIn, pit.robotWidthIn, pit.robotHeightIn) +
+                (pit.trenchCapable ? ' · trench ✓' : '')
+              }
+              testid="team-pit-dimensions"
+            />
+            <div className="flex flex-col gap-1.5" data-testid="team-pit-auto">
+              <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-foreground [&_svg]:size-4">
+                <Route />
+                Preferred auto
+              </span>
+              {pit.preferredAutoStartPosition || pit.preferredAutoPath ? (
+                <div className="mx-auto w-full max-w-[420px]">
+                  <FieldDiagram
+                    mode="view"
+                    startPosition={pit.preferredAutoStartPosition}
+                    path={pit.preferredAutoPath}
+                    data-testid="team-pit-auto-field"
+                  />
+                </div>
+              ) : (
+                <span className="text-sm text-muted-foreground" data-testid="team-pit-auto-empty">
+                  No preferred auto recorded.
+                </span>
+              )}
+            </div>
             {pit.notes ? (
               <div className="flex flex-col gap-1.5" data-testid="team-pit-notes">
                 <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-muted-foreground [&_svg]:size-4">

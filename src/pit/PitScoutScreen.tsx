@@ -4,16 +4,24 @@ import {
   Camera,
   CheckCircle2,
   ClipboardList,
+  Eraser,
+  Eye,
+  BatteryCharging,
   Gauge,
   ListChecks,
   Loader2,
+  Ruler,
+  Route,
   StickyNote,
+  Swords,
   Trash2,
   Wrench,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { FieldDiagram, type FieldPoint } from '@/components/FieldDiagram';
+import { useIsPortrait } from '@/components/useIsPortrait';
 import { cn } from '@/lib/utils';
 import {
   savePitDraft,
@@ -45,6 +53,18 @@ function previewFor(file: Blob): string {
 const DRIVETRAINS = ['', 'swerve', 'tank', 'mecanum', 'west_coast', 'other'];
 const CAPABILITY_OPTIONS = ['auto', 'climb_l1', 'climb_l2', 'climb_l3', 'defense'];
 const INTAKE_OPTIONS = ['neutral', 'depot', 'human_feed'];
+// Common REBUILT mechanisms; scouts can add anything else via the "Other" field.
+const MECHANISM_OPTIONS = [
+  'intake',
+  'shooter',
+  'elevator',
+  'arm',
+  'climber',
+  'hopper',
+  'indexer',
+  'turret',
+];
+const STRATEGY_OPTIONS = ['score', 'feed', 'defend', 'cycle', 'support'];
 
 // Human-friendly labels for the option keys (values written to the DB are
 // unchanged — only the displayed text is prettified).
@@ -62,6 +82,19 @@ const OPTION_LABELS: Record<string, string> = {
   neutral: 'Neutral',
   depot: 'Depot',
   human_feed: 'Human feed',
+  intake: 'Intake',
+  shooter: 'Shooter',
+  elevator: 'Elevator',
+  arm: 'Arm',
+  climber: 'Climber',
+  hopper: 'Hopper',
+  indexer: 'Indexer',
+  turret: 'Turret',
+  score: 'Score',
+  feed: 'Feed',
+  defend: 'Defend',
+  cycle: 'Cycle',
+  support: 'Support',
 };
 
 function labelFor(key: string): string {
@@ -76,10 +109,31 @@ function emptyReport(p: PitScoutScreenProps): PitReport {
     mechanisms: [],
     capabilities: [],
     intakeSources: [],
+    visionSystem: '',
+    batteryCount: null,
+    chargerCount: null,
+    batteryBrand: '',
+    batteryConnector: '',
+    preferredAutoStartPosition: null,
+    preferredAutoPath: null,
+    matchStrategy: [],
+    robotLengthIn: null,
+    robotWidthIn: null,
+    robotHeightIn: null,
+    trenchCapable: false,
     photoPath: null,
     notes: '',
     scoutId: p.scoutId,
   };
+}
+
+// Parse a number input into `number | null` (empty / invalid → null) so partial
+// entries never coerce to 0 or NaN in the report.
+function parseNum(v: string): number | null {
+  const t = v.trim();
+  if (t === '') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
 }
 
 export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element {
@@ -88,6 +142,9 @@ export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element 
   const [status, setStatus] = React.useState<'idle' | 'saving' | 'saved' | 'error'>(
     'idle'
   );
+  // Preferred-auto editor: tap to place the start, or draw the path.
+  const [autoMode, setAutoMode] = React.useState<'pick-start' | 'draw-path'>('pick-start');
+  const isPortrait = useIsPortrait();
 
   // The chosen photo is held locally as bytes and uploaded at sync time, so pit
   // scouting works with zero network. A ref keeps the latest blob available to
@@ -114,7 +171,9 @@ export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element 
     let active = true;
     void getPitDraft(props.eventKey, props.teamNumber).then((draft) => {
       if (active && draft) {
-        setReport(draft.data);
+        // Merge over defaults so a draft saved by an older build (missing the
+        // newer fields) rehydrates with valid values instead of `undefined`.
+        setReport({ ...emptyReport(props), ...draft.data });
         if (draft.photoBlob) {
           // A photo captured offline, still pending upload.
           setLocalPreview(draft.photoBlob);
@@ -253,26 +312,47 @@ export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element 
         </select>
       </div>
 
-      <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
-        <Label htmlFor="pit-mechanisms" className="flex items-center gap-1.5 text-base">
+      <fieldset className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
+        <legend className="flex items-center gap-1.5 px-1 text-base font-semibold">
           <Cog className="size-5 text-brand" />
-          Mechanisms (comma separated)
+          Mechanisms
+        </legend>
+        <div className="flex flex-col gap-2">
+          {MECHANISM_OPTIONS.map((m) => {
+            const active = report.mechanisms.includes(m);
+            return (
+              <label key={m} className={optionChip(active, 'brand')}>
+                <input
+                  type="checkbox"
+                  className={cn('size-6', TONE_ACCENT.brand)}
+                  checked={active}
+                  onChange={() => update({ mechanisms: toggle(report.mechanisms, m) })}
+                />
+                {labelFor(m)}
+              </label>
+            );
+          })}
+        </div>
+        <Label htmlFor="pit-mechanisms-other" className="mt-1 text-sm text-muted-foreground">
+          Other (comma separated)
         </Label>
         <Input
-          id="pit-mechanisms"
+          id="pit-mechanisms-other"
+          data-testid="pit-mechanisms-other"
           className="h-14 text-base"
-          placeholder="e.g. elevator, shooter, intake"
-          value={report.mechanisms.join(', ')}
-          onChange={(e) =>
-            update({
-              mechanisms: e.target.value
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
-          }
+          placeholder="e.g. passive deflector, vision turret"
+          value={report.mechanisms.filter((m) => !MECHANISM_OPTIONS.includes(m)).join(', ')}
+          onChange={(e) => {
+            // Preserve the checklist selections; replace only the free-text extras.
+            const known = report.mechanisms.filter((m) => MECHANISM_OPTIONS.includes(m));
+            const custom = e.target.value
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+            update({ mechanisms: [...known, ...custom] });
+          }}
         />
-      </div>
+      </fieldset>
 
       <fieldset className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
         <legend className="flex items-center gap-1.5 px-1 text-base font-semibold">
@@ -323,6 +403,240 @@ export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element 
               </label>
             );
           })}
+        </div>
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
+        <legend className="flex items-center gap-1.5 px-1 text-base font-semibold">
+          <Swords className="size-5 text-brand" />
+          Preferred match strategy
+        </legend>
+        <div className="flex flex-col gap-2">
+          {STRATEGY_OPTIONS.map((s) => {
+            const active = report.matchStrategy.includes(s);
+            return (
+              <label key={s} className={optionChip(active, 'brand')}>
+                <input
+                  type="checkbox"
+                  className={cn('size-6', TONE_ACCENT.brand)}
+                  checked={active}
+                  onChange={() => update({ matchStrategy: toggle(report.matchStrategy, s) })}
+                />
+                {labelFor(s)}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
+        <Label htmlFor="pit-vision" className="flex items-center gap-1.5 text-base">
+          <Eye className="size-5 text-brand" />
+          Vision system
+        </Label>
+        <Input
+          id="pit-vision"
+          data-testid="pit-vision"
+          className="h-14 text-base"
+          placeholder="e.g. Limelight 3, PhotonVision, none"
+          value={report.visionSystem}
+          onChange={(e) => update({ visionSystem: e.target.value })}
+        />
+      </div>
+
+      <fieldset className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
+        <legend className="flex items-center gap-1.5 px-1 text-base font-semibold">
+          <BatteryCharging className="size-5 text-energy" />
+          Batteries &amp; chargers
+        </legend>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pit-battery-count" className="text-sm text-muted-foreground">
+              # of batteries
+            </Label>
+            <Input
+              id="pit-battery-count"
+              data-testid="pit-battery-count"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              className="h-14 text-base"
+              placeholder="0"
+              value={report.batteryCount ?? ''}
+              onChange={(e) => update({ batteryCount: parseNum(e.target.value) })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pit-charger-count" className="text-sm text-muted-foreground">
+              # of chargers
+            </Label>
+            <Input
+              id="pit-charger-count"
+              data-testid="pit-charger-count"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              className="h-14 text-base"
+              placeholder="0"
+              value={report.chargerCount ?? ''}
+              onChange={(e) => update({ chargerCount: parseNum(e.target.value) })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pit-battery-brand" className="text-sm text-muted-foreground">
+              Brand
+            </Label>
+            <Input
+              id="pit-battery-brand"
+              data-testid="pit-battery-brand"
+              className="h-14 text-base"
+              placeholder="e.g. MK, Duracell"
+              value={report.batteryBrand}
+              onChange={(e) => update({ batteryBrand: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pit-battery-connector" className="text-sm text-muted-foreground">
+              Connector type
+            </Label>
+            <Input
+              id="pit-battery-connector"
+              data-testid="pit-battery-connector"
+              className="h-14 text-base"
+              placeholder="e.g. Anderson SB50"
+              value={report.batteryConnector}
+              onChange={(e) => update({ batteryConnector: e.target.value })}
+            />
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
+        <legend className="flex items-center gap-1.5 px-1 text-base font-semibold">
+          <Ruler className="size-5 text-brand" />
+          Robot dimensions
+        </legend>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pit-length" className="text-sm text-muted-foreground">
+              Length (in)
+            </Label>
+            <Input
+              id="pit-length"
+              data-testid="pit-length"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              className="h-14 text-base"
+              placeholder="0"
+              value={report.robotLengthIn ?? ''}
+              onChange={(e) => update({ robotLengthIn: parseNum(e.target.value) })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pit-width" className="text-sm text-muted-foreground">
+              Width (in)
+            </Label>
+            <Input
+              id="pit-width"
+              data-testid="pit-width"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              className="h-14 text-base"
+              placeholder="0"
+              value={report.robotWidthIn ?? ''}
+              onChange={(e) => update({ robotWidthIn: parseNum(e.target.value) })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="pit-height" className="text-sm text-muted-foreground">
+              Height (in)
+            </Label>
+            <Input
+              id="pit-height"
+              data-testid="pit-height"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              className="h-14 text-base"
+              placeholder="0"
+              value={report.robotHeightIn ?? ''}
+              onChange={(e) => update({ robotHeightIn: parseNum(e.target.value) })}
+            />
+          </div>
+        </div>
+        <label className={cn(optionChip(report.trenchCapable, 'success'), 'mt-1')}>
+          <input
+            type="checkbox"
+            data-testid="pit-trench"
+            className={cn('size-6', TONE_ACCENT.success)}
+            checked={report.trenchCapable}
+            onChange={() => update({ trenchCapable: !report.trenchCapable })}
+          />
+          Can fit through the trench
+        </label>
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
+        <legend className="flex items-center gap-1.5 px-1 text-base font-semibold">
+          <Route className="size-5 text-brand" />
+          Preferred auto
+        </legend>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            data-testid="pit-auto-pick-start"
+            variant={autoMode === 'pick-start' ? 'brand' : 'outline'}
+            size="sm"
+            onClick={() => setAutoMode('pick-start')}
+          >
+            Set start
+          </Button>
+          <Button
+            type="button"
+            data-testid="pit-auto-draw-path"
+            variant={autoMode === 'draw-path' ? 'brand' : 'outline'}
+            size="sm"
+            onClick={() => setAutoMode('draw-path')}
+          >
+            Draw path
+          </Button>
+          <Button
+            type="button"
+            data-testid="pit-auto-clear"
+            variant="outline"
+            size="sm"
+            className="ml-auto gap-1.5"
+            onClick={() => update({ preferredAutoStartPosition: null, preferredAutoPath: null })}
+          >
+            <Eraser className="size-4" /> Clear
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {autoMode === 'pick-start'
+            ? isPortrait
+              ? 'Turn phone sideways · tap the start spot'
+              : 'Tap the field where it starts'
+            : 'Drag across the field to draw the path'}
+        </p>
+        <div
+          className={
+            isPortrait
+              ? 'mx-auto flex h-[55dvh] w-full justify-center'
+              : 'mx-auto w-full max-w-[480px]'
+          }
+        >
+          <FieldDiagram
+            mode={autoMode}
+            rotate={isPortrait}
+            fillHeight={isPortrait}
+            startPosition={report.preferredAutoStartPosition}
+            path={report.preferredAutoPath}
+            onStartChange={(p: FieldPoint) => update({ preferredAutoStartPosition: p })}
+            onPathChange={(pts: FieldPoint[]) => update({ preferredAutoPath: pts })}
+            data-testid="pit-auto-field"
+          />
         </div>
       </fieldset>
 

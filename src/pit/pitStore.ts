@@ -5,9 +5,28 @@ export interface PitReport {
   eventKey: string;
   teamNumber: number;
   drivetrain: string;
+  // Selected mechanism keys plus any free-text "other" entries, all in one list.
   mechanisms: string[];
   capabilities: string[];
   intakeSources: string[];
+  // Vision system, free-text (e.g. "Limelight 3", "PhotonVision", "none").
+  visionSystem: string;
+  // Battery / charger inventory. Counts are null until entered.
+  batteryCount: number | null;
+  chargerCount: number | null;
+  batteryBrand: string;
+  batteryConnector: string;
+  // Preferred auto routine — same {x,y} normalized shape as match reports, so the
+  // dashboard can draw it on the FieldDiagram.
+  preferredAutoStartPosition: { x: number; y: number } | null;
+  preferredAutoPath: { x: number; y: number }[] | null;
+  // Preferred match strategy keys (score / feed / defend / …).
+  matchStrategy: string[];
+  // Robot dimensions in inches (null until entered) + trench-pass capability.
+  robotLengthIn: number | null;
+  robotWidthIn: number | null;
+  robotHeightIn: number | null;
+  trenchCapable: boolean;
   photoPath: string | null;
   notes: string;
   scoutId: string;
@@ -110,6 +129,22 @@ export function pitUpsertPayload(report: PitReport): Record<string, unknown> {
     capabilities: {
       items: report.capabilities,
       intakeSources: report.intakeSources,
+    },
+    vision_system: report.visionSystem,
+    batteries: {
+      count: report.batteryCount,
+      chargers: report.chargerCount,
+      brand: report.batteryBrand,
+      connector: report.batteryConnector,
+    },
+    preferred_auto_start_position: report.preferredAutoStartPosition,
+    preferred_auto_path: report.preferredAutoPath,
+    match_strategy: report.matchStrategy,
+    robot_dimensions: {
+      lengthIn: report.robotLengthIn,
+      widthIn: report.robotWidthIn,
+      heightIn: report.robotHeightIn,
+      trenchCapable: report.trenchCapable,
     },
     photo_path: report.photoPath,
     notes: report.notes,

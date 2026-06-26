@@ -13,9 +13,57 @@ export interface TeamPit {
   mechanisms: string[];
   capabilities: string[];
   intakeSources: string[];
+  visionSystem: string | null;
+  batteryCount: number | null;
+  chargerCount: number | null;
+  batteryBrand: string | null;
+  batteryConnector: string | null;
+  preferredAutoStartPosition: { x: number; y: number } | null;
+  preferredAutoPath: { x: number; y: number }[] | null;
+  matchStrategy: string[];
+  robotLengthIn: number | null;
+  robotWidthIn: number | null;
+  robotHeightIn: number | null;
+  trenchCapable: boolean;
   photoPath: string | null;
   notes: string | null;
   authorScoutId: string | null;
+}
+
+// Pull the battery sub-object out of the `batteries` jsonb column, tolerating a
+// missing/legacy null.
+function normalizeBatteries(raw: unknown): {
+  count: number | null;
+  chargers: number | null;
+  brand: string | null;
+  connector: string | null;
+} {
+  const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+  return {
+    count: num(obj.count),
+    chargers: num(obj.chargers),
+    brand: str(obj.brand),
+    connector: str(obj.connector),
+  };
+}
+
+// Pull robot dimensions out of the `robot_dimensions` jsonb column.
+function normalizeDimensions(raw: unknown): {
+  lengthIn: number | null;
+  widthIn: number | null;
+  heightIn: number | null;
+  trenchCapable: boolean;
+} {
+  const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return {
+    lengthIn: num(obj.lengthIn),
+    widthIn: num(obj.widthIn),
+    heightIn: num(obj.heightIn),
+    trenchCapable: obj.trenchCapable === true,
+  };
 }
 
 function normalizeCapabilities(raw: unknown): { capabilities: string[]; intakeSources: string[] } {
@@ -49,6 +97,8 @@ export function useTeamPit(eventKey: string | null | undefined, teamNumber: numb
       if (error) throw error;
       if (!data) return null;
       const { capabilities, intakeSources } = normalizeCapabilities(data.capabilities);
+      const batteries = normalizeBatteries(data.batteries);
+      const dims = normalizeDimensions(data.robot_dimensions);
       return {
         eventKey: data.event_key,
         teamNumber: data.team_number,
@@ -56,6 +106,21 @@ export function useTeamPit(eventKey: string | null | undefined, teamNumber: numb
         mechanisms: Array.isArray(data.mechanisms) ? data.mechanisms : [],
         capabilities,
         intakeSources,
+        visionSystem: data.vision_system ?? null,
+        batteryCount: batteries.count,
+        chargerCount: batteries.chargers,
+        batteryBrand: batteries.brand,
+        batteryConnector: batteries.connector,
+        preferredAutoStartPosition:
+          data.preferred_auto_start_position && typeof data.preferred_auto_start_position === 'object'
+            ? data.preferred_auto_start_position
+            : null,
+        preferredAutoPath: Array.isArray(data.preferred_auto_path) ? data.preferred_auto_path : null,
+        matchStrategy: Array.isArray(data.match_strategy) ? data.match_strategy : [],
+        robotLengthIn: dims.lengthIn,
+        robotWidthIn: dims.widthIn,
+        robotHeightIn: dims.heightIn,
+        trenchCapable: dims.trenchCapable,
         photoPath: data.photo_path ?? null,
         notes: data.notes ?? null,
         authorScoutId: data.author_scout_id ?? null,

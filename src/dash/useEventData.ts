@@ -15,6 +15,7 @@ import {
 } from '@/dash/SeasonStats';
 import type { EventWebcast } from '@/dash/EventStream';
 import type { MsrRow } from '@/dash/types';
+import { NEXUS_POLL_MS } from '@/dash/constants';
 
 const STALE_TIME = 60_000;
 
@@ -374,9 +375,13 @@ export function useEventEpa(
 }
 
 /**
- * Live field status for an event from FRC Nexus (through nexus-proxy). Short
- * staleTime for liveness. Returns a parsed status + an `available` flag that is
- * false when Nexus is unavailable/unset, so callers can degrade to the schedule.
+ * Live field status for an event from FRC Nexus (through nexus-proxy). This is
+ * REAL-TIME data — what's queuing / on the field right now — so it must never go
+ * stale: `staleTime: 0` + a short `refetchInterval` poll keep the On-Field /
+ * Queuing tiles advancing as matches play, and `refetchOnWindowFocus` snaps it
+ * fresh when the lead returns to the tab. The nexus-proxy itself is uncached, so
+ * every poll hits Nexus fresh. Returns a parsed status + an `available` flag
+ * that is false when Nexus is unavailable/unset, so callers degrade to the schedule.
  */
 export function useNexusEventStatus(
   eventKey: string | null,
@@ -384,7 +389,12 @@ export function useNexusEventStatus(
   return useQuery({
     queryKey: ['nexus', 'event', eventKey],
     enabled: !!eventKey,
-    staleTime: 15_000,
+    staleTime: 0,
+    gcTime: 0,
+    refetchInterval: NEXUS_POLL_MS,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnMount: 'always',
     queryFn: async (): Promise<NexusStatusResult> => {
       const json = await nexusGet<unknown>(`/event/${eventKey}`);
       const unavailable =

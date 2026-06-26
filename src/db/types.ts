@@ -120,9 +120,9 @@ export interface CachedTeam {
   nickname: string | null;
 }
 
-/** Bookkeeping for the last successful preload of an event (or the global roster). */
+/** Bookkeeping for the last successful preload of an event. */
 export interface PreloadMeta {
-  key: string; // event_key, or the literal 'roster' for the global roster
+  key: string; // event_key (the roster is folded into each event's preload + counts)
   lastPreloadAt: string; // ISO timestamp
   counts: { matches?: number; assignments?: number; roster?: number; teams?: number };
 }

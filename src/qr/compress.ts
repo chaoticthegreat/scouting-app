@@ -24,22 +24,38 @@ async function pipeThrough(
   // rather than via Blob/Response — the Web Streams API is consistent across
   // browsers and Node, whereas Blob.stream()/Response interop is not (jsdom).
   const writer = stream.writable.getWriter();
+  const reader = stream.readable.getReader();
+  // Drive the write CONCURRENTLY with the read so backpressure on a large payload
+  // can't deadlock — but keep the promise (with a handler) so write/close
+  // rejections SURFACE instead of becoming swallowed unhandled rejections (the
+  // old `void writer.write()/close()` lost errors on large inputs).
   // Cast: lib.dom types the writer as BufferSource, but the newer Uint8Array
   // generic (ArrayBufferLike) isn't structurally assignable; the value is a
   // plain Uint8Array at runtime.
-  void writer.write(input as unknown as BufferSource);
-  void writer.close();
+  const writeDone = writer.write(input as unknown as BufferSource).then(() => writer.close());
 
-  const reader = stream.readable.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for (;;) {
-    // eslint-disable-next-line no-await-in-loop
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    total += value.length;
+  let readErr: unknown;
+  try {
+    for (;;) {
+      // eslint-disable-next-line no-await-in-loop
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.length;
+    }
+  } catch (err) {
+    readErr = err;
   }
+  // Observe the write side's completion/error too. Prefer surfacing a read error.
+  try {
+    await writeDone;
+  } catch (err) {
+    if (readErr === undefined) readErr = err;
+  }
+  if (readErr !== undefined) throw readErr;
+
   const out = new Uint8Array(total);
   let offset = 0;
   for (const c of chunks) {

@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { supabase } from '@/lib/supabase';
+import { isAuthClassError } from '@/sync/classifyError';
 
 export interface PitReport {
   eventKey: string;
@@ -265,4 +266,20 @@ export async function requeuePitReport(draftKey: string): Promise<void> {
     syncAttempts: 0,
     lastSyncError: null,
   });
+}
+
+/**
+ * Requeue ONLY auth/RLS-class pit dead-letters back to 'dirty' — the pit-write
+ * RLS fix (migration 0021) makes the wrongly-terminal 42501-class failures
+ * succeed now. Mirrors requeueAuthClassDeadLetters for match reports (the pit
+ * path had no equivalent, so pit reports that dead-lettered before 0021 stayed
+ * stuck forever). Validation-class dead-letters are left alone. Returns the count.
+ */
+export async function requeueAuthClassPitDeadLetters(): Promise<number> {
+  const dead = await listPitDeadLetters();
+  const targets = dead.filter((r) => isAuthClassError(r.lastSyncError));
+  for (const r of targets) {
+    await requeuePitReport(r.draftKey);
+  }
+  return targets.length;
 }

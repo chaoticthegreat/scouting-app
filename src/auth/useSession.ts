@@ -4,6 +4,7 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { ScoutRow } from './scoutRow';
 import { rememberScoutIdentity } from '@/roster/scoutIdentityCache';
+import { isScouterLoggedOut } from '@/roster/selectScouter';
 
 export interface UseSessionResult {
   session: Session | null;
@@ -111,7 +112,15 @@ export function useSession(): UseSessionResult {
       if (!mounted.current) return;
       setSession(next);
 
-      if (next?.user) {
+      if (next?.user && isScouterLoggedOut()) {
+        // This device durably logged out and hasn't picked a new name yet. The
+        // anon auth.uid is still bound to the old scout row server-side, so without
+        // this guard loadScout would resurrect the old profile on EVERY screen that
+        // uses useSession directly (/my-data, /pit) — not just ScoutHome, which has
+        // its own override. Honor the flag everywhere until a new pick clears it.
+        setScout(null);
+        writeCachedScout(null);
+      } else if (next?.user) {
         const s: ScoutRow | null | undefined = await loadScout(next.user.id);
         if (!mounted.current) return;
         if (s === undefined) {

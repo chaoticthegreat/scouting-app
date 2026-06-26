@@ -34,7 +34,7 @@ import { FieldDiagram } from '@/components/FieldDiagram';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Sheet } from '@/components/ui/Sheet';
 import { cn } from '@/lib/utils';
-import { formatMatchKeyRaw } from '@/lib/formatMatch';
+import { formatMatchKeyRaw, compareMatchKeys } from '@/lib/formatMatch';
 import { foulReasonLabel } from '@/scoring/fouls';
 import { aggregateEvent, type TeamAgg } from '@/dash/aggregate';
 import {
@@ -532,9 +532,11 @@ function TeamPhotoCard(props: {
 function TeamTrends(props: { matches: MsrRow[] }): JSX.Element {
   const { matches } = props;
 
-  // Stable chronological order so x-axis labels read left→right by match.
+  // Stable chronological order so x-axis labels read left→right by match. Sort by
+  // (comp-level, match number) parsed from the key — a plain string localeCompare
+  // orders "qm10" before "qm2" (lexicographic), scrambling the trend x-axis.
   const ordered = useMemo(
-    () => matches.slice().sort((a, b) => a.match_key.localeCompare(b.match_key)),
+    () => matches.slice().sort((a, b) => compareMatchKeys(a.match_key, b.match_key)),
     [matches],
   );
 

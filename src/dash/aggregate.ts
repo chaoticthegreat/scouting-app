@@ -42,12 +42,24 @@ function clamp01(x: number): number {
   return x;
 }
 
-/** Teleop climb points for a single match (success-gated; level 0 -> 0). */
+/**
+ * Climb points for a single match: the success-gated teleop/endgame climb PLUS
+ * the auto-climb bonus. A level-1 auto climb (auto_climb_level1) scores the auto
+ * bonus regardless of the teleop climb outcome — it was previously dropped, so
+ * auto climbs went uncounted in scoutingExpectedPoints.
+ */
 function climbPointsForMatch(r: MsrRow): number {
-  if (!r.climb_success) return 0;
-  const lvl = r.climb_level as 1 | 2 | 3;
-  const entry = (SCORING.CLIMB as Record<number, { auto: number; teleop: number }>)[lvl];
-  return entry ? entry.teleop : 0;
+  const climb = SCORING.CLIMB as Record<number, { auto: number; teleop: number }>;
+  let pts = 0;
+  if (r.climb_success) {
+    const entry = climb[r.climb_level as 1 | 2 | 3];
+    if (entry) pts += entry.teleop;
+  }
+  // Auto-period level-1 climb bonus (independent of the teleop climb result).
+  if (r.auto_climb_level1) {
+    pts += climb[1].auto;
+  }
+  return pts;
 }
 
 /**

@@ -27,6 +27,7 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
   const [addValue, setAddValue] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Load the picklist on mount / event change.
   useEffect(() => {
@@ -88,9 +89,14 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
   async function onSave(): Promise<void> {
     setSaving(true);
     setSaved(false);
+    setSaveError(null);
     try {
       await savePicklist(eventKey, entries);
       setSaved(true);
+    } catch (err) {
+      // Without this, a failed save was a silent unhandled rejection — the lead
+      // thought the picklist saved when it didn't. Surface it so they can retry.
+      setSaveError(err instanceof Error ? err.message : 'Failed to save picklist.');
     } finally {
       setSaving(false);
     }
@@ -132,6 +138,11 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
             {saved ? (
               <span data-testid="pick-saved" className="text-xs text-success">
                 Saved
+              </span>
+            ) : null}
+            {saveError ? (
+              <span data-testid="pick-save-error" className="text-xs text-destructive">
+                {saveError}
               </span>
             ) : null}
             <Button

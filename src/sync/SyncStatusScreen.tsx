@@ -7,11 +7,121 @@
 //
 // The data fetch is isolated in `fetchCoverage` (which only touches the
 // supabase client) so tests can drive it by mocking `@/lib/supabase`.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useSession } from '@/auth/useSession';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BackLink } from '@/components/ui/BackLink';
+import { Button } from '@/components/ui/button';
+import { getSyncQueue, listDeadLetters, requeueReport } from '@/db/localStore';
+import { getPitSyncQueue, listPitDeadLetters, requeuePitReport } from '@/pit/pitStore';
+import { formatMatchKeyRaw } from '@/lib/formatMatch';
+
+interface LocalDeadLetter {
+  id: string;
+  label: string;
+  error: string | null;
+  kind: 'match' | 'pit';
+}
+
+/**
+ * This device's local outbox: how many reports are queued and which ones have
+ * DEAD-LETTERED (stuck), with their error and a Retry. The server-coverage card
+ * below only shows what reached the server — without this, a stuck report was
+ * invisible here even though the header badge counted it.
+ */
+function LocalOutbox(): JSX.Element {
+  const [queued, setQueued] = useState(0);
+  const [dead, setDead] = useState<LocalDeadLetter[]>([]);
+  const [retrying, setRetrying] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const [mq, pq, md, pd] = await Promise.all([
+      getSyncQueue(),
+      getPitSyncQueue(),
+      listDeadLetters(),
+      listPitDeadLetters(),
+    ]);
+    setQueued(mq.length + pq.length);
+    setDead([
+      ...md.map((r) => ({
+        id: r.id,
+        label: `${formatMatchKeyRaw(r.matchKey)} · Team ${r.targetTeamNumber}`,
+        error: r.lastSyncError ?? null,
+        kind: 'match' as const,
+      })),
+      ...pd.map((r) => ({
+        id: r.draftKey,
+        label: `Pit · Team ${r.teamNumber}`,
+        error: r.lastSyncError ?? null,
+        kind: 'pit' as const,
+      })),
+    ]);
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const retryAll = useCallback(async () => {
+    setRetrying(true);
+    try {
+      for (const d of dead) {
+        if (d.kind === 'match') await requeueReport(d.id);
+        else await requeuePitReport(d.id);
+      }
+      // Nudge the sync engine (useSync listens for this) to drain immediately.
+      window.dispatchEvent(new Event('scout-sync-changed'));
+      await refresh();
+    } finally {
+      setRetrying(false);
+    }
+  }, [dead, refresh]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-xl text-brand">This device — local outbox</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <p data-testid="local-outbox-queued" className="text-sm text-muted-foreground">
+          {queued} queued to upload · {dead.length} failed
+        </p>
+        {dead.length > 0 ? (
+          <>
+            <ul className="flex flex-col gap-2">
+              {dead.map((d) => (
+                <li
+                  key={`${d.kind}:${d.id}`}
+                  data-testid="local-outbox-deadletter"
+                  className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm"
+                >
+                  <div className="font-semibold">{d.label}</div>
+                  {d.error ? (
+                    <div className="mt-0.5 text-xs text-destructive [overflow-wrap:anywhere]">
+                      {d.error}
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            <Button
+              data-testid="local-outbox-retry"
+              variant="outline"
+              className="self-start"
+              disabled={retrying}
+              onClick={() => void retryAll()}
+            >
+              {retrying ? 'Retrying…' : 'Retry all failed'}
+            </Button>
+          </>
+        ) : (
+          <p className="text-sm text-success">No failed reports on this device.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export interface CoverageAssignment {
   match_key: string;
@@ -132,6 +242,7 @@ export default function SyncStatusScreen(): JSX.Element {
         <BackLink to="/" label="Home" icon="home" />
         <h1 className="text-2xl font-bold">Sync status</h1>
       </div>
+      <LocalOutbox />
       <Card>
         <CardHeader>
           <CardTitle className="text-xl text-brand">Server coverage</CardTitle>

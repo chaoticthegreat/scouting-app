@@ -7,10 +7,14 @@ export async function uploadPitPhoto(
   teamNumber: number,
   file: Blob
 ): Promise<string> {
-  const path = eventKey + '/' + teamNumber + '/' + crypto.randomUUID() + '.jpg';
+  // DETERMINISTIC path (one pit photo per team per event) + upsert:true so a
+  // retry / re-drain OVERWRITES the same object instead of writing a new random
+  // path each time — the old random-UUID + upsert:false orphaned the previous
+  // object in Storage on every re-upload.
+  const path = eventKey + '/' + teamNumber + '.jpg';
   const { error } = await supabase.storage
     .from(BUCKET)
-    .upload(path, file, { upsert: false });
+    .upload(path, file, { upsert: true });
   if (error) {
     throw new Error(error.message);
   }

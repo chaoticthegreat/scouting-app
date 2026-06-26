@@ -52,8 +52,15 @@ export async function addScouter(name: string): Promise<void> {
   if (!trimmed) return;
   const { error } = await supabase.from('scouter_roster').insert({ name: trimmed });
   if (error) {
-    // A duplicate name is not an error to surface — the name is already on the roster.
-    if ((error as { code?: string }).code === UNIQUE_VIOLATION) return;
+    // A duplicate name is not an error to surface — the name is already on the
+    // roster. But it may be HIDDEN: re-adding a name is the lead deliberately
+    // bringing it back, so ensure it's visible again (un-hide is a no-op if it
+    // was already visible). Without this, "Add" silently did nothing for a hidden
+    // scouter and they never reappeared in the picker.
+    if ((error as { code?: string }).code === UNIQUE_VIOLATION) {
+      await setScouterHidden(trimmed, false);
+      return;
+    }
     throw new Error(error.message);
   }
 }

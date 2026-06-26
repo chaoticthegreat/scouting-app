@@ -18,6 +18,14 @@ export type SyncErrorKind = 'transient' | 'terminal';
 /** HTTP status codes that are retryable even though they are 4xx. */
 const TRANSIENT_4XX = new Set([408, 429]);
 
+/**
+ * Postgres SQLSTATE classes that are transient infrastructure failures (retry),
+ * not permanent validation/auth errors. Connection (08), insufficient resources
+ * (53, e.g. 53300 too_many_connections), operator intervention (57P), and
+ * serialization/deadlock (40001 / 40P01).
+ */
+const TRANSIENT_SQLSTATE = /^(08|53|57P|40001|40P01)/i;
+
 /** Extract a numeric HTTP-ish status from a `.status` or `.code` field. */
 function numericStatus(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -59,6 +67,16 @@ export function classifySyncError(err: unknown): SyncErrorKind {
       if (codeStatus !== null && codeStatus >= 100 && codeStatus <= 599) {
         return classifyHttpStatus(codeStatus);
       }
+      // Postgres connection / resource / serialization-class SQLSTATEs are
+      // transient infrastructure hiccups, not validation failures — retry them
+      // instead of dead-lettering:
+      //   08xxx  connection exception
+      //   53xxx  insufficient resources (e.g. 53300 too_many_connections)
+      //   57Pxx  operator intervention (admin_shutdown / cannot_connect_now)
+      //   40001  serialization_failure   40P01  deadlock_detected
+      if (typeof e.code === 'string' && TRANSIENT_SQLSTATE.test(e.code)) {
+        return 'transient';
+      }
       // Any other code = a DB/PostgREST/Postgres error code → terminal
       // (validation / auth / ownership).
       return 'terminal';
@@ -96,4 +114,18 @@ const AUTH_CLASS = /\b(42501|28000|401|403|PGRST301)\b|not authoriz|not authenti
 export function isAuthClassError(message: string | null | undefined): boolean {
   if (!message) return false;
   return AUTH_CLASS.test(message);
+}
+
+/**
+ * A dead-letter that the server fix in migration 0025 (upsert_match_report now
+ * supersedes a conflicting active report instead of raising 23505) makes
+ * recoverable. Reports that dead-lettered on the one-active-report-per-match
+ * unique index are safe to auto-requeue once after 0025 ships; they will now
+ * supersede the stale row instead of failing again.
+ */
+const SUPERSEDE_RECOVERABLE = /idx_msr_match_scout_active/i;
+
+export function isSupersedeRecoverable(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return SUPERSEDE_RECOVERABLE.test(message);
 }

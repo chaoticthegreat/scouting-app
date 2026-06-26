@@ -70,9 +70,13 @@ describe('rosterClient', () => {
     expect(insertMock).not.toHaveBeenCalled();
   });
 
-  it('addScouter swallows a unique-violation (duplicate name)', async () => {
+  it('addScouter swallows a unique-violation and UN-HIDES the existing name', async () => {
+    // Re-adding a name that already exists (and may be hidden) should bring it
+    // back into the picker rather than silently no-op.
     insertMock.mockResolvedValue({ error: { code: '23505', message: 'dup' } });
+    rpcMock.mockResolvedValue({ error: null });
     await expect(addScouter('Ada')).resolves.toBeUndefined();
+    expect(rpcMock).toHaveBeenCalledWith('set_roster_hidden', { p_name: 'Ada', p_hidden: false });
   });
 
   it('addScouter throws on other errors', async () => {

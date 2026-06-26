@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatMatchKey, formatMatchKeyRaw } from '../formatMatch';
+import { formatMatchKey, formatMatchKeyRaw, compareMatchKeys } from '../formatMatch';
 
 describe('formatMatchKey', () => {
   it('formats qualification matches', () => {
@@ -32,9 +32,34 @@ describe('formatMatchKeyRaw', () => {
   it('parses double-elim style tokens', () => {
     expect(formatMatchKeyRaw('2026casnv_sf3m1')).toBe('Semi 3');
   });
+  it('disambiguates best-of-3 finals and double-elim replays (no collapse)', () => {
+    expect(formatMatchKeyRaw('2026casnv_f1m1')).toBe('Final 1');
+    expect(formatMatchKeyRaw('2026casnv_f1m2')).toBe('Final 2');
+    expect(formatMatchKeyRaw('2026casnv_f1m3')).toBe('Final 3');
+    expect(formatMatchKeyRaw('2026casnv_sf3m2')).toBe('Semi 3-2');
+  });
   it('handles bare tokens and empty input', () => {
     expect(formatMatchKeyRaw('qm7')).toBe('Qual 7');
     expect(formatMatchKeyRaw('')).toBe('');
     expect(formatMatchKeyRaw('garbage')).toBe('garbage');
+  });
+});
+
+describe('compareMatchKeys', () => {
+  it('orders by match number, not lexicographically (qm2 before qm10)', () => {
+    const keys = ['2026casnv_qm10', '2026casnv_qm2', '2026casnv_qm1'];
+    expect(keys.slice().sort(compareMatchKeys)).toEqual([
+      '2026casnv_qm1',
+      '2026casnv_qm2',
+      '2026casnv_qm10',
+    ]);
+  });
+  it('orders quals before playoffs before finals', () => {
+    const keys = ['2026casnv_f1', '2026casnv_qm50', '2026casnv_sf3'];
+    expect(keys.slice().sort(compareMatchKeys)).toEqual([
+      '2026casnv_qm50',
+      '2026casnv_sf3',
+      '2026casnv_f1',
+    ]);
   });
 });

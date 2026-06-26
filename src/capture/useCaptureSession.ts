@@ -129,9 +129,12 @@ export function useCaptureSession(target: CaptureTarget) {
 
   // Open-interval starts for the defense / getting-defended timers. Each holds the
   // phase-elapsed ms AND the phase it began in, so the committed interval lands on
-  // the right part of the match timeline.
-  const defenseStartRef = useRef<{ ms: number; phase: 'auto' | 'teleop' } | null>(null);
-  const defendedStartRef = useRef<{ ms: number; phase: 'auto' | 'teleop' } | null>(null);
+  // the right part of the match timeline. `wall` is a monotonic performance.now()
+  // timestamp at begin so the committed DURATION is correct even when the interval
+  // spans the auto→teleop boundary (the phase-elapsed clock resets across phases,
+  // which would otherwise compute a 0/negative duration and silently drop it).
+  const defenseStartRef = useRef<{ ms: number; phase: 'auto' | 'teleop'; wall: number } | null>(null);
+  const defendedStartRef = useRef<{ ms: number; phase: 'auto' | 'teleop'; wall: number } | null>(null);
 
   const phaseElapsed = (): number =>
     clock.state.phase === 'teleop' ? clock.teleopElapsedMs : clock.autoElapsedMs;
@@ -340,8 +343,15 @@ export function useCaptureSession(target: CaptureTarget) {
       if (!s) return;
       startRef.current = null;
       const startMs = s.ms;
-      const endMs = Math.max(phaseElapsed(), startMs);
-      const durationMs = endMs - startMs;
+      // Duration from the monotonic wall clock so an interval that began in auto
+      // and ended in teleop (the phase-elapsed clock resets at the boundary) keeps
+      // its true length instead of computing ≤ 0 and being dropped.
+      const wallDurationMs = Math.max(0, performance.now() - s.wall);
+      const samePhase = phaseTag() === s.phase;
+      // Same phase: end on the live phase clock (keeps timeline coords exact).
+      // Crossed the boundary: anchor end off start + the real elapsed duration.
+      const endMs = samePhase ? Math.max(phaseElapsed(), startMs) : startMs + wallDurationMs;
+      const durationMs = samePhase ? Math.max(0, endMs - startMs) : wallDurationMs;
       if (durationMs <= 0) return;
       setDeferred((prev) => {
         const next: DeferredState = {
@@ -357,14 +367,16 @@ export function useCaptureSession(target: CaptureTarget) {
   );
 
   const beginDefense = useCallback(() => {
-    if (!defenseStartRef.current) defenseStartRef.current = { ms: phaseElapsed(), phase: phaseTag() };
+    if (!defenseStartRef.current)
+      defenseStartRef.current = { ms: phaseElapsed(), phase: phaseTag(), wall: performance.now() };
   }, [clock.state.phase, clock.teleopElapsedMs, clock.autoElapsedMs]);
   const endDefense = useCallback(
     () => commitInterval(defenseStartRef, 'defenseDurationMs', 'defenseIntervals'),
     [commitInterval],
   );
   const beginDefended = useCallback(() => {
-    if (!defendedStartRef.current) defendedStartRef.current = { ms: phaseElapsed(), phase: phaseTag() };
+    if (!defendedStartRef.current)
+      defendedStartRef.current = { ms: phaseElapsed(), phase: phaseTag(), wall: performance.now() };
   }, [clock.state.phase, clock.teleopElapsedMs, clock.autoElapsedMs]);
   const endDefended = useCallback(
     () => commitInterval(defendedStartRef, 'defendedDurationMs', 'defendedIntervals'),

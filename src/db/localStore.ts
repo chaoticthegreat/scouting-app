@@ -8,7 +8,7 @@ import type {
   CachedTeam,
   PreloadMeta,
 } from './types';
-import { isAuthClassError } from '@/sync/classifyError';
+import { isAuthClassError, isSupersedeRecoverable } from '@/sync/classifyError';
 
 export class ScoutingDb extends Dexie {
   reports!: Table<LocalMatchReport, string>;
@@ -119,7 +119,12 @@ export async function listDeadLetters(): Promise<LocalMatchReport[]> {
 // per session (guarded by the caller) after a server-side RLS/RPC fix ships.
 export async function requeueAuthClassDeadLetters(): Promise<number> {
   const dead = await listDeadLetters();
-  const targets = dead.filter((r) => isAuthClassError(r.lastSyncError));
+  // Auth/RLS-class (migration 0012) AND active-report-conflict-class (migration
+  // 0025: upsert now supersedes instead of raising 23505) dead-letters are both
+  // server-fix-recoverable — requeue them once. Validation-class stays dead.
+  const targets = dead.filter(
+    (r) => isAuthClassError(r.lastSyncError) || isSupersedeRecoverable(r.lastSyncError),
+  );
   for (const r of targets) {
     await requeueReport(r.id);
   }

@@ -83,6 +83,23 @@ describe('autoAssign', () => {
     expect(out).toHaveLength(60);
   });
 
+  it('(a2) covers EVERY match even when the scout pool equals the slots/match with a break cadence', () => {
+    // 5 scouts, 5 slots/match (own team in red1), breakEveryN=6. The scheduled
+    // break must NOT leave any match unscouted — regression for the lockstep gap
+    // where every breakEveryN-th match got zero assignments.
+    const matches = buildMatches();
+    const out = autoAssign(matches, buildScouts(5), {
+      ownTeam: 3256,
+      breakEveryN: 6,
+      rotatePositions: true,
+    });
+    for (const m of matches) {
+      const filled = out.filter((a) => a.matchKey === m.matchKey).length;
+      expect(filled).toBe(5); // all five non-own-team slots covered
+    }
+    expect(out).toHaveLength(60);
+  });
+
   it('(b) balances assignments within ±1 across scouts', () => {
     const scouts = buildScouts(6);
     const out = autoAssign(buildMatches(), scouts, OPTS);
@@ -128,16 +145,20 @@ describe('autoAssign break cadence', () => {
     return best;
   }
 
-  it('(e) no scout exceeds breakEveryN consecutive assignments', () => {
-    const matches = buildMatches(); // 12 matches, 5 slots each
-    const scouts = buildScouts(6);
+  it('(e) honors breakEveryN (no over-long streak) AND keeps full coverage when there is slack', () => {
+    // Coverage is MANDATORY; the scheduled break is best-effort. With ample slack
+    // (10 scouts for 5 slots/match) the break can be honored AND every slot filled.
+    // (The old version used 6 scouts for 5 slots, where honoring a hard break is
+    // only possible by DROPPING slots — that was the A2 unscouted-match bug.)
+    const matches = buildMatches(); // 12 matches, 5 slots each = 60 slots
+    const scouts = buildScouts(10);
     const opts: AssignOptions = { ownTeam: 3256, breakEveryN: 2, rotatePositions: false };
     const out = autoAssign(matches, scouts, opts);
     for (const s of scouts) {
       expect(longestStreak(out, matches, s.id)).toBeLessThanOrEqual(2);
     }
-    // Sanity: still produced assignments and never touched 3256.
-    expect(out.length).toBeGreaterThan(0);
+    // Full coverage: every slot of every match is filled, and 3256 is never scouted.
+    expect(out).toHaveLength(60);
     expect(out.some((a) => a.targetTeamNumber === 3256)).toBe(false);
   });
 });

@@ -1,23 +1,28 @@
 // supabase/functions/nexus-proxy/index.ts
-// Mirrors statbotics-proxy: CORS, OPTIONS, ?path= param, 5-min cache, graceful
-// { available: false } on upstream 5xx/network error, and the DENO_ENV test hook.
-// Difference: upstream is the FRC Nexus API and we attach the Nexus-Api-Key header
-// from the NEXUS_API_KEY secret. If that secret is missing we degrade gracefully.
+// Live FRC Nexus field-status proxy. Attaches the Nexus-Api-Key header from the
+// NEXUS_API_KEY secret. Graceful { available: false } on a missing key, any
+// network error, OR any non-OK upstream status — so a Nexus outage / a 404 for
+// an event with no live data never surfaces as a hard error to the dashboard.
+//
+// NO CACHING: Nexus reports the LIVE field (what's queuing / on the field right
+// now), so every request must hit upstream fresh. A stale cache would freeze the
+// "On Field" / "Queuing" tiles mid-event. Responses are sent with no-store.
 import { corsHeaders } from "../_shared/cors.ts";
 
 const NEXUS_BASE = "https://frc.nexus/api/v1";
-const CACHE_TTL_MS = 300_000;
 
-interface CacheEntry {
-  expires: number;
-  body: string;
-}
-const cache = new Map<string, CacheEntry>();
+// No-store on every response: this is live data; nothing here may be cached by
+// the browser, a CDN, or React Query's HTTP layer.
+const NO_STORE = "no-store, no-cache, must-revalidate";
 
 function unavailable(): Response {
   return new Response(JSON.stringify({ available: false }), {
     status: 200,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json",
+      "Cache-Control": NO_STORE,
+    },
   });
 }
 
@@ -38,26 +43,13 @@ Deno.serve(async (req) => {
     );
   }
 
-  const now = Date.now();
-  const cached = cache.get(path);
-  if (cached && cached.expires > now) {
-    return new Response(cached.body, {
-      status: 200,
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json",
-        "X-Cache": "HIT",
-      },
-    });
-  }
-
   // Test-only hook to simulate an upstream outage deterministically.
   // Disabled in production to prevent misuse.
   if (Deno.env.get("DENO_ENV") !== "production") {
     const forced = url.searchParams.get("_forceUpstreamStatus");
     if (forced) {
       const code = Number(forced);
-      if (code >= 500) return unavailable();
+      if (code >= 400) return unavailable();
     }
   }
 
@@ -76,21 +68,19 @@ Deno.serve(async (req) => {
     return unavailable();
   }
 
-  if (upstream.status >= 500) {
+  // ANY non-OK upstream status (404 for an event with no live data, 4xx, 5xx)
+  // degrades to the sentinel rather than surfacing a hard error to the client.
+  if (!upstream.ok) {
     return unavailable();
   }
 
   const body = await upstream.text();
-  if (upstream.ok) {
-    cache.set(path, { expires: now + CACHE_TTL_MS, body });
-  }
-
   return new Response(body, {
-    status: upstream.status,
+    status: 200,
     headers: {
       ...corsHeaders,
       "Content-Type": "application/json",
-      "X-Cache": "MISS",
+      "Cache-Control": NO_STORE,
     },
   });
 });

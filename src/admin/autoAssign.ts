@@ -61,13 +61,21 @@ export function autoAssign(
     }
 
     for (const slot of slots) {
-      const eligible = scouts.filter((s) => {
+      // Hard eligibility: not already on this match, and available this match.
+      const baseEligible = scouts.filter((s) => {
         if (usedThisMatch.has(s.id)) return false;
         if (s.unavailableMatchKeys?.includes(match.matchKey)) return false;
-        // Scheduled break: if breakEveryN>0 and this scout has hit the cadence, rest this match.
-        if (opts.breakEveryN > 0 && (consecutive.get(s.id) ?? 0) >= opts.breakEveryN) return false;
         return true;
       });
+
+      // Scheduled break is a SOFT preference: prefer scouts who are NOT due for a
+      // rest, but NEVER drop a slot just because everyone is due. When the scout
+      // pool equals the slot count, the break used to fire for everyone at once,
+      // leaving entire matches (every breakEveryN-th) completely unscouted.
+      const notOnBreak = baseEligible.filter(
+        (s) => !(opts.breakEveryN > 0 && (consecutive.get(s.id) ?? 0) >= opts.breakEveryN),
+      );
+      const eligible = notOnBreak.length > 0 ? notOnBreak : baseEligible;
 
       // When the pool is larger than slots, also avoid back-to-back same scout.
       const slotsThisMatch = slots.length;

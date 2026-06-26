@@ -5,6 +5,7 @@ import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
 import { supabase } from '@/lib/supabase';
 import { nexusGet } from '@/dash/proxies';
 import { parseNexusEventStatus, type NexusEventStatus } from '@/dash/nexusClient';
+import { NEXUS_POLL_MS } from '@/dash/constants';
 import { getCachedMatches } from '@/db/preloadClient';
 import { cn } from '@/lib/utils';
 
@@ -228,14 +229,16 @@ export function UpcomingMatches({
     };
   }, [eventKey]);
 
-  // Live field status from Nexus (degrades silently when unavailable).
+  // Live field status from Nexus (degrades silently when unavailable). This is
+  // REAL-TIME data, so we poll on NEXUS_POLL_MS rather than fetching once — the
+  // proxy is uncached, so each poll reflects the current field.
   useEffect(() => {
     if (!eventKey) {
       setNexus(null);
       return;
     }
     let cancelled = false;
-    void (async () => {
+    const fetchNexus = async (): Promise<void> => {
       const json = await nexusGet<unknown>(`/event/${eventKey}`);
       if (cancelled) return;
       const unavailable =
@@ -243,9 +246,12 @@ export function UpcomingMatches({
         json !== null &&
         (json as { available?: unknown }).available === false;
       setNexus(unavailable ? null : parseNexusEventStatus(json));
-    })();
+    };
+    void fetchNexus();
+    const id = setInterval(() => void fetchNexus(), NEXUS_POLL_MS);
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, [eventKey]);
 

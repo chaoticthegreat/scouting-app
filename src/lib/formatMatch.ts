@@ -27,6 +27,28 @@ export function formatMatchKey(
   return `${label}${n}`.trim();
 }
 
+/** Play order for comp levels: qual → playoffs → final. */
+const LEVEL_SORT: Record<string, number> = { qm: 0, q: 0, qual: 0, ef: 1, qf: 2, sf: 3, f: 4, final: 4 };
+
+/** Parse a raw match key into a [levelRank, matchNumber] sort key. */
+function matchSortKey(matchKey: string): [number, number] {
+  const tail = matchKey.includes('_') ? matchKey.slice(matchKey.lastIndexOf('_') + 1) : matchKey;
+  const m = tail.match(/^([a-zA-Z]+)(\d+)/);
+  if (!m) return [9, Number.MAX_SAFE_INTEGER];
+  return [LEVEL_SORT[m[1].toLowerCase()] ?? 9, Number(m[2])];
+}
+
+/**
+ * Compare two raw match keys in PLAY order (comp level, then match number).
+ * A plain string compare orders "qm10" before "qm2"; this parses the trailing
+ * "<level><number>" so "qm2" precedes "qm10" and quals precede playoffs.
+ */
+export function compareMatchKeys(a: string, b: string): number {
+  const [la, na] = matchSortKey(a);
+  const [lb, nb] = matchSortKey(b);
+  return la !== lb ? la - lb : na - nb;
+}
+
 /**
  * "2026casnv_qm1" -> "Qual 1". Parses the trailing "<level><number>" token.
  * Falls back to the raw key if it can't be parsed.
@@ -35,8 +57,25 @@ export function formatMatchKeyRaw(matchKey: string | null | undefined): string {
   if (!matchKey) return '';
   // Take the part after the event code, e.g. "2026casnv_qm1" -> "qm1".
   const tail = matchKey.includes('_') ? matchKey.slice(matchKey.lastIndexOf('_') + 1) : matchKey;
-  // Double-elim keys can look like "sf3m1"; prefer the leading level + first number.
-  const m = tail.match(/^([a-zA-Z]+)(\d+)/);
+  // Parse "<level><set>" with an optional "m<match>" suffix (double-elim /
+  // best-of-3 finals: "sf3m1", "f1m2"). Without the suffix-aware parse, "f1m1"
+  // and "f1m2" (the THREE final games) all collapse to "Final 1", and double-elim
+  // replays lose their identity.
+  const m = tail.match(/^([a-zA-Z]+)(\d+)(?:m(\d+))?/);
   if (!m) return matchKey;
-  return formatMatchKey(m[1], Number(m[2]));
+  const level = m[1];
+  const setNum = Number(m[2]);
+  const within = m[3] != null ? Number(m[3]) : null;
+  const lvl = level.toLowerCase();
+  // Finals are a best-of-N within a single set ("f1m1/f1m2/f1m3"): the match
+  // number is the game number, so "f1m2" → "Final 2".
+  if ((lvl === 'f' || lvl === 'final') && within != null) {
+    return formatMatchKey(level, within);
+  }
+  // Other playoff rounds key off the set number ("sf3m1" → "Semi 3"); only
+  // disambiguate when a set genuinely has more than one match ("sf3m2" → "Semi 3-2").
+  if (within != null && within > 1) {
+    return `${formatMatchKey(level, setNum)}-${within}`;
+  }
+  return formatMatchKey(level, setNum);
 }

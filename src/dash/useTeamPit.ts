@@ -66,6 +66,20 @@ function normalizeDimensions(raw: unknown): {
   };
 }
 
+/**
+ * Validate a preferred-auto start position from jsonb: only return it when BOTH
+ * x and y are finite numbers. A malformed payload (missing/NaN/string coords)
+ * would otherwise flow into the FieldDiagram and render an off-field or broken dot.
+ */
+function normalizeStartPosition(raw: unknown): { x: number; y: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as { x?: unknown; y?: unknown };
+  if (typeof o.x === 'number' && Number.isFinite(o.x) && typeof o.y === 'number' && Number.isFinite(o.y)) {
+    return { x: o.x, y: o.y };
+  }
+  return null;
+}
+
 function normalizeCapabilities(raw: unknown): { capabilities: string[]; intakeSources: string[] } {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const obj = raw as { items?: unknown; intakeSources?: unknown };
@@ -111,10 +125,7 @@ export function useTeamPit(eventKey: string | null | undefined, teamNumber: numb
         chargerCount: batteries.chargers,
         batteryBrand: batteries.brand,
         batteryConnector: batteries.connector,
-        preferredAutoStartPosition:
-          data.preferred_auto_start_position && typeof data.preferred_auto_start_position === 'object'
-            ? data.preferred_auto_start_position
-            : null,
+        preferredAutoStartPosition: normalizeStartPosition(data.preferred_auto_start_position),
         preferredAutoPath: Array.isArray(data.preferred_auto_path) ? data.preferred_auto_path : null,
         matchStrategy: Array.isArray(data.match_strategy) ? data.match_strategy : [],
         robotLengthIn: dims.lengthIn,

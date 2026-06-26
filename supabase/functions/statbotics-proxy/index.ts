@@ -66,17 +66,17 @@ Deno.serve(async (req) => {
     return unavailable();
   }
 
-  if (upstream.status >= 500) {
+  // ANY non-OK upstream status degrades to the sentinel so the dashboard can
+  // fall back (e.g. to local EPA) instead of seeing a hard 4xx/5xx.
+  if (!upstream.ok) {
     return unavailable();
   }
 
   const body = await upstream.text();
-  if (upstream.ok) {
-    cache.set(path, { expires: now + CACHE_TTL_MS, body });
-  }
+  cache.set(path, { expires: now + CACHE_TTL_MS, body });
 
   return new Response(body, {
-    status: upstream.status,
+    status: 200,
     headers: {
       ...corsHeaders,
       "Content-Type": "application/json",

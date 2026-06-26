@@ -63,6 +63,7 @@ export function ReviewScreen(props: {
 }) {
   const s = props.session;
   const [step, setStep] = useState(0); // 0-indexed; UI shows step + 1
+  const [saving, setSaving] = useState(false);
   const isPortrait = useIsPortrait();
 
   const agg = computeAggregates({
@@ -85,8 +86,19 @@ export function ReviewScreen(props: {
   };
 
   const onSave = async () => {
-    const id = await s.save();
-    props.onSaved(id);
+    // In-flight guard: a double-tap would call s.save() twice, creating two report
+    // rows for the same (match, scout) that then collide on the server's
+    // one-active-report-per-match unique index (idx_msr_match_scout_active).
+    if (saving) return;
+    setSaving(true);
+    try {
+      const id = await s.save();
+      props.onSaved(id);
+    } catch {
+      // save() persists locally first, so a failure here is unexpected; re-enable
+      // the button so the scout can retry rather than getting stuck.
+      setSaving(false);
+    }
   };
 
   const isFirst = step === 0;
@@ -448,10 +460,11 @@ export function ReviewScreen(props: {
                 variant="success"
                 size="xl"
                 className="w-full"
+                disabled={saving}
                 onClick={() => void onSave()}
               >
                 <Save />
-                SAVE
+                {saving ? 'SAVING…' : 'SAVE'}
               </Button>
             </div>
           </section>

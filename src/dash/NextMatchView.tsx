@@ -169,10 +169,12 @@ function shortMatchLabel(label: string): string {
   const m = /(\d+)\s*$/.exec(label);
   const num = m ? m[1] : '';
   const lower = label.toLowerCase();
-  if (lower.startsWith('q')) return `Q${num}`;
-  if (lower.startsWith('sf') || lower.startsWith('semi')) return `SF${num}`;
-  if (lower.startsWith('f') || lower.startsWith('final')) return `F${num}`;
+  // Order matters: test the more specific prefixes BEFORE the bare "q", otherwise
+  // "Quarterfinal"/"Quarter" gets swallowed by the "q" → "Q{n}" branch.
   if (lower.startsWith('qf') || lower.startsWith('quarter')) return `QF${num}`;
+  if (lower.startsWith('sf') || lower.startsWith('semi')) return `SF${num}`;
+  if (lower.startsWith('qm') || lower.startsWith('qual') || lower.startsWith('q')) return `Q${num}`;
+  if (lower.startsWith('f') || lower.startsWith('final')) return `F${num}`;
   const first = label.trim().charAt(0).toUpperCase();
   return num ? `${first}${num}` : label;
 }

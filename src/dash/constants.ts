@@ -29,3 +29,11 @@ export const WINPROB_LOGIT_SCALE = 1.7;
 
 /** Our team: never scouted (EPA-only in predictions, omitted from our auto overlay). */
 export const OUR_TEAM = 3256;
+
+/**
+ * Poll interval (ms) for LIVE Nexus field status. Nexus reports what is queuing /
+ * on the field right now, so the dashboard re-fetches on this cadence to keep the
+ * On-Field / Queuing tiles advancing as matches play. Kept short for near-real-time
+ * liveness; the nexus-proxy is uncached so every poll reflects the current field.
+ */
+export const NEXUS_POLL_MS = 10_000;

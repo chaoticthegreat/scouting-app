@@ -1,6 +1,6 @@
 // src/sync/__tests__/classifyError.test.ts
 import { describe, it, expect } from 'vitest';
-import { classifySyncError, isAuthClassError } from '../classifyError';
+import { classifySyncError, isAuthClassError, isSupersedeRecoverable } from '../classifyError';
 
 describe('classifySyncError', () => {
   describe('transient (→ retry with backoff)', () => {
@@ -39,6 +39,15 @@ describe('classifySyncError', () => {
       expect(classifySyncError(undefined)).toBe('transient');
     });
 
+    it('classifies Postgres connection/resource/serialization SQLSTATEs as transient', () => {
+      expect(classifySyncError({ code: '08006' })).toBe('transient'); // connection_failure
+      expect(classifySyncError({ code: '08003' })).toBe('transient'); // connection_does_not_exist
+      expect(classifySyncError({ code: '53300' })).toBe('transient'); // too_many_connections
+      expect(classifySyncError({ code: '57P03' })).toBe('transient'); // cannot_connect_now
+      expect(classifySyncError({ code: '40001' })).toBe('transient'); // serialization_failure
+      expect(classifySyncError({ code: '40P01' })).toBe('transient'); // deadlock_detected
+    });
+
     it('classifies an unknown/ambiguous error as transient', () => {
       expect(classifySyncError({ message: 'something weird' })).toBe('transient');
       expect(classifySyncError('plain string')).toBe('transient');
@@ -74,6 +83,29 @@ describe('classifySyncError', () => {
     it('classifies a string 4xx code (other than 408/429) as terminal', () => {
       expect(classifySyncError({ code: '404' })).toBe('terminal');
     });
+
+    it('still classifies the one-active-report unique violation 23505 as terminal', () => {
+      // It dead-letters immediately, but is later auto-requeued once the 0025
+      // supersede fix ships (see isSupersedeRecoverable).
+      expect(classifySyncError({ code: '23505' })).toBe('terminal');
+    });
+  });
+});
+
+describe('isSupersedeRecoverable', () => {
+  it('matches the one-active-report-per-match unique-index violation', () => {
+    expect(
+      isSupersedeRecoverable(
+        'duplicate key value violates unique constraint "idx_msr_match_scout_active"',
+      ),
+    ).toBe(true);
+  });
+
+  it('does NOT match unrelated errors', () => {
+    expect(isSupersedeRecoverable('invalid input syntax for type integer')).toBe(false);
+    expect(isSupersedeRecoverable('Failed to fetch')).toBe(false);
+    expect(isSupersedeRecoverable(null)).toBe(false);
+    expect(isSupersedeRecoverable(undefined)).toBe(false);
   });
 });
 

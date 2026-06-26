@@ -50,6 +50,10 @@ test('scouter captures a match offline and it queues as unsynced', async ({ page
 
   await page.getByTestId('scout-start-capture').click();
 
+  // Pre-match placement step (half-field auto picker) gates the live screen.
+  await expect(page.getByTestId('capture-placement-submit')).toBeVisible();
+  await page.getByTestId('capture-placement-submit').click();
+
   await expect(page.getByTestId('capture-start')).toBeVisible();
   await page.getByTestId('capture-start').click();
   await expect(page.getByTestId('capture-go')).toBeVisible();
@@ -57,21 +61,33 @@ test('scouter captures a match offline and it queues as unsynced', async ({ page
   await expect(page.getByTestId('capture-go-interstitial')).toBeVisible();
   await page.getByTestId('capture-inactive-no').click();
 
-  // Slider-shoot: a press/release commits one fuel burst; the readout counts bursts.
+  // Slider-shoot: press, drag RIGHT to set a BPS rate, hold, release to commit a
+  // fuel burst (running count = ∫ rate·dt). A coordinateless tap is rate 0 / 0 balls,
+  // so drive a real drag-and-hold and assert a non-zero burst landed.
   await expect(page.getByTestId('capture-running-fuel')).toHaveText('0');
   const hold = page.getByTestId('capture-hold');
-  await hold.dispatchEvent('pointerdown');
-  await hold.dispatchEvent('pointerup');
-  await expect(page.getByTestId('capture-running-fuel')).toHaveText('1');
-  await hold.dispatchEvent('pointerdown');
-  await hold.dispatchEvent('pointerup');
-  await expect(page.getByTestId('capture-running-fuel')).toHaveText('2');
+  const box = await hold.boundingBox();
+  if (!box) throw new Error('capture-hold has no bounding box');
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.1, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7, y, { steps: 5 });
+  await page.waitForTimeout(500); // hold so the rate integrates to a non-zero count
+  await page.mouse.up();
+  await expect
+    .poll(async () => Number(await page.getByTestId('capture-running-fuel').textContent()))
+    .toBeGreaterThan(0);
 
-  // Deferred review: set a climb level, then SAVE.
+  // Deferred review: a multi-step wizard. Step 1 is Climb; SAVE is on the last
+  // ("Review & save") step, so set the climb then advance with Next to reach it.
   await page.getByTestId('capture-to-review').click();
-  await expect(page.getByTestId('review-summary')).toBeVisible();
   await page.getByTestId('review-climb').getByRole('button', { name: '3', exact: true }).click();
-  await page.getByTestId('review-save').click();
+  const save = page.getByTestId('review-save');
+  for (let i = 0; i < 6 && !(await save.isVisible()); i += 1) {
+    await page.getByTestId('review-next').click();
+  }
+  await expect(page.getByTestId('review-summary')).toBeVisible();
+  await save.click();
 
   // Back on the scout home, still offline: the report stays queued (not synced).
   await expect(page.getByTestId('scout-home')).toBeVisible({ timeout: 15_000 });

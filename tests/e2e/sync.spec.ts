@@ -64,6 +64,9 @@ test('captured report syncs to the server on reconnect with no duplicate', async
   await expect(page.getByTestId('scout-start-capture')).toBeEnabled();
   await page.getByTestId('scout-start-capture').click();
 
+  // Pre-match placement step (half-field auto picker) gates the live screen.
+  await page.getByTestId('capture-placement-submit').click();
+
   await page.getByTestId('capture-start').click();
   await page.getByTestId('capture-go').click();
   await page.getByTestId('capture-inactive-no').click();
@@ -71,9 +74,14 @@ test('captured report syncs to the server on reconnect with no duplicate', async
   await hold.dispatchEvent('pointerdown');
   await hold.dispatchEvent('pointerup');
 
+  // Multi-step review wizard: climb is step 1, SAVE is on the last step.
   await page.getByTestId('capture-to-review').click();
   await page.getByTestId('review-climb').getByRole('button', { name: '3', exact: true }).click();
-  await page.getByTestId('review-save').click();
+  const save = page.getByTestId('review-save');
+  for (let i = 0; i < 6 && !(await save.isVisible()); i += 1) {
+    await page.getByTestId('review-next').click();
+  }
+  await save.click();
 
   // Back on the scout home, online: the outbox (auto-sync) drains the queue.
   await expect(page.getByTestId('scout-home')).toBeVisible({ timeout: 15_000 });

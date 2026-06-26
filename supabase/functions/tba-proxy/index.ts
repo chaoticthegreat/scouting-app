@@ -51,9 +51,23 @@ Deno.serve(async (req) => {
     });
   }
 
-  const upstream = await fetch(`${TBA_BASE}${path}`, {
-    headers: { "X-TBA-Auth-Key": TBA_API_KEY, Accept: "application/json" },
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${TBA_BASE}${path}`, {
+      headers: { "X-TBA-Auth-Key": TBA_API_KEY, Accept: "application/json" },
+    });
+  } catch (_err) {
+    // Upstream network failure: return a clean, CORS-friendly handled error
+    // (502) instead of letting the rejection bubble to an unhandled 500.
+    // Optional callers (tbaGetOptional) degrade on this; strict callers surface it.
+    return new Response(
+      JSON.stringify({ error: "tba upstream unreachable" }),
+      {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
   const body = await upstream.text();
 
   if (upstream.ok) {

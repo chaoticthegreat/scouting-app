@@ -301,7 +301,12 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
     );
   }
 
-  const selectedRows = sortedRows.filter((r) => selected.includes(r.agg.teamNumber));
+  // Order compare columns by the user's SELECTION order, not the table's current
+  // sort — tapping C then A then B should show C, A, B (filtering sortedRows would
+  // re-order them by whatever column is sorted).
+  const selectedRows = selected
+    .map((tn) => sortedRows.find((r) => r.agg.teamNumber === tn))
+    .filter((r): r is (typeof sortedRows)[number] => r != null);
 
   const arrow = (key: SortKey) =>
     key === sortKey ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';

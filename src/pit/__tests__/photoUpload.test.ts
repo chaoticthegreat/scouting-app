@@ -27,17 +27,14 @@ describe('uploadPitPhoto', () => {
     );
   });
 
-  it('uploads to a namespaced .jpg path and returns it', async () => {
+  it('uploads to a deterministic per-team .jpg path (upsert) and returns it', async () => {
     uploadMock.mockResolvedValue({ data: { path: 'x' }, error: null });
     const file = new Blob(['abc'], { type: 'image/jpeg' });
     const path = await uploadPitPhoto('2026casj', 254, file);
     expect(supabase.storage.from).toHaveBeenCalledWith('pit-photos');
-    expect(uploadMock).toHaveBeenCalledWith(
-      '2026casj/254/11111111-1111-1111-1111-111111111111.jpg',
-      file,
-      { upsert: false }
-    );
-    expect(path).toBe('2026casj/254/11111111-1111-1111-1111-111111111111.jpg');
+    // Deterministic path + upsert:true → a retry overwrites instead of orphaning.
+    expect(uploadMock).toHaveBeenCalledWith('2026casj/254.jpg', file, { upsert: true });
+    expect(path).toBe('2026casj/254.jpg');
   });
 
   it('throws on upload error', async () => {

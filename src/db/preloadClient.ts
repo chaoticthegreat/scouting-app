@@ -62,6 +62,9 @@ export async function preloadEventData(opts: {
     if (rows.length) {
       await db.cachedMatches.where('event_key').equals(eventKey).delete();
       await db.cachedMatches.bulkPut(rows);
+      // Prune OTHER events' cached matches so the cache stays bounded to the event
+      // being scouted (otherwise every event ever preloaded accumulates forever).
+      await db.cachedMatches.where('event_key').notEqual(eventKey).delete();
     }
     counts.matches = rows.length;
   } catch (err) {
@@ -72,10 +75,14 @@ export async function preloadEventData(opts: {
   try {
     const roster = await listRoster();
     const rows: CachedRosterScouter[] = roster.map((r) => ({ id: r.id, name: r.name }));
-    // Only replace the cached roster when we actually fetched names; never wipe
-    // it to empty on a successful-but-empty response.
+    // listRoster() THROWS on failure (caught below), so a successful empty result
+    // is AUTHORITATIVE — the roster genuinely has no visible names. Clear the cache
+    // first so deleted/hidden scouters don't linger in the offline picker forever
+    // (the previous `if (rows.length)` guard could never empty the cache). There's
+    // no select_scouter re-point race on the scouter_roster table, unlike the
+    // event-scoped/assignment queries below.
+    await db.cachedRoster.clear();
     if (rows.length) {
-      await db.cachedRoster.clear();
       await db.cachedRoster.bulkPut(rows);
     }
     counts.roster = rows.length;
@@ -145,6 +152,9 @@ export async function preloadEventData(opts: {
     if (rows.length) {
       await db.cachedTeams.where('event_key').equals(eventKey).delete();
       await db.cachedTeams.bulkPut(rows);
+      // Prune OTHER events' cached teams so the cache stays bounded to the event
+      // being scouted.
+      await db.cachedTeams.where('event_key').notEqual(eventKey).delete();
     }
     counts.teams = rows.length;
   } catch (err) {

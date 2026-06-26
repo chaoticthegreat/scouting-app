@@ -13,7 +13,11 @@ import { useOnline } from '@/sync/useOnline';
 import { syncOnce } from '@/sync/outbox';
 import { syncPitOnce } from '@/sync/pitOutbox';
 import { getSyncQueue, listDeadLetters, requeueAuthClassDeadLetters } from '@/db/localStore';
-import { getPitSyncQueue, listPitDeadLetters } from '@/pit/pitStore';
+import {
+  getPitSyncQueue,
+  listPitDeadLetters,
+  requeueAuthClassPitDeadLetters,
+} from '@/pit/pitStore';
 import { SYNC_POLL_MS } from '@/sync/constants';
 
 export interface UseSyncResult {
@@ -99,8 +103,14 @@ export function useSync(): UseSyncResult {
     if (!online || requeuedAuthRef.current) return;
     requeuedAuthRef.current = true;
     void (async () => {
-      const requeued = await requeueAuthClassDeadLetters();
-      if (requeued > 0) {
+      // Both the match-report (migration 0012) AND pit-report (migration 0021)
+      // write paths had server-side fixes that make previously auth/RLS-class
+      // dead-letters succeed now — requeue both once.
+      const [matchRequeued, pitRequeued] = await Promise.all([
+        requeueAuthClassDeadLetters(),
+        requeueAuthClassPitDeadLetters(),
+      ]);
+      if (matchRequeued > 0 || pitRequeued > 0) {
         await run();
       } else {
         await refreshCounts();

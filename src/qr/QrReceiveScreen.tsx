@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BrowserQRCodeReader } from '@zxing/browser';
-import { Camera, CameraOff, CheckCircle2 } from 'lucide-react';
+import { Camera, CameraOff, CheckCircle2, RotateCcw } from 'lucide-react';
 import { FountainDecoder, parseFrame, bytesToReports } from '@/qr/envelope';
 import { decompressForQr } from '@/qr/compress';
 import { postIngest } from '@/qr/ingestClient';
@@ -46,6 +46,47 @@ export default function QrReceiveScreen() {
   const [failedCount, setFailedCount] = useState(0);
   const [failedError, setFailedError] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // True when an ingest failed but the fully-decoded batch is still held in
+  // decoderRef, so the upload can be retried WITHOUT re-scanning every frame.
+  const [canRetry, setCanRetry] = useState(false);
+
+  // Upload the already-decoded batch held in decoderRef. Extracted so both the
+  // auto-complete path and a manual "Retry upload" can run it; the decoded bytes
+  // survive a transient network failure, so a blip mid-upload never forces a
+  // full re-scan of the sender's screen.
+  const runIngest = useCallback(async (): Promise<void> => {
+    setPhase('ingesting');
+    setErrorMessage(null);
+    setCanRetry(false);
+    try {
+      const decoder = decoderRef.current;
+      const raw = await decompressForQr(decoder.payloadBytes(), decoder.compressed ?? false);
+      const reports = bytesToReports(raw);
+      const result = await postIngest(reports);
+      setIngested(result.ingested);
+      setFailedCount(result.failed.length);
+      setFailedError(result.failed[0]?.error ?? null);
+      if (result.ingested === 0 && result.failed.length > 0) {
+        // Everything decoded but the server rejected every row → surface it AND
+        // allow a retry (the rejection may be a transient RLS/auth blip).
+        setErrorMessage(
+          `Server rejected all ${result.failed.length} report${
+            result.failed.length === 1 ? '' : 's'
+          }: ${result.failed[0]?.error ?? 'unknown error'}`,
+        );
+        setPhase('error');
+        setCanRetry(true);
+      } else {
+        setPhase('done');
+      }
+    } catch (err) {
+      // Transient network/ingest failure AFTER a full decode: the batch is still
+      // in decoderRef, so keep it and offer a retry instead of discarding it.
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to upload reports.');
+      setPhase('error');
+      setCanRetry(true);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,38 +117,12 @@ export default function QrReceiveScreen() {
       delayBetweenScanSuccess: QR_SCAN_DELAY_MS,
     });
 
-    const handleComplete = async () => {
+    const handleComplete = () => {
       // Guard against the callback firing again after we've already finished.
       if (completedRef.current) return;
       completedRef.current = true;
       controlsRef.current?.stop();
-      setPhase('ingesting');
-
-      try {
-        const decoder = decoderRef.current;
-        const raw = await decompressForQr(decoder.payloadBytes(), decoder.compressed ?? false);
-        const reports = bytesToReports(raw);
-        const result = await postIngest(reports);
-        if (cancelled) return;
-        setIngested(result.ingested);
-        setFailedCount(result.failed.length);
-        setFailedError(result.failed[0]?.error ?? null);
-        // Everything decoded but the server rejected every row → that's a
-        // failure, not a quiet "0 uploaded". Surface it so the scout knows the
-        // backlog did NOT land and can retry / report it.
-        setPhase(result.ingested === 0 && result.failed.length > 0 ? 'error' : 'done');
-        if (result.ingested === 0 && result.failed.length > 0) {
-          setErrorMessage(
-            `Server rejected all ${result.failed.length} report${
-              result.failed.length === 1 ? '' : 's'
-            }: ${result.failed[0]?.error ?? 'unknown error'}`,
-          );
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setErrorMessage(err instanceof Error ? err.message : 'Failed to upload reports.');
-        setPhase('error');
-      }
+      void runIngest();
     };
 
     // Resolve the rear-facing camera id when the platform labels its devices.
@@ -137,12 +152,27 @@ export default function QrReceiveScreen() {
             if (!text) return;
             const frame = parseFrame(text);
             if (!frame) return; // malformed/foreign frame — ignore, no crash
-            const decoder = decoderRef.current;
+            let decoder = decoderRef.current;
+            // A restarted sender (navigation, lock/unlock, re-open to push a fresh
+            // backlog) emits a NEW session id. FountainDecoder pins to the first
+            // session and silently drops every frame from any other one, so without
+            // this the receiver freezes mid-decode forever. If a different session
+            // appears while we're still incomplete, adopt it (start a fresh decode).
+            if (
+              decoder.sessionId !== null &&
+              frame.s !== decoder.sessionId &&
+              !decoder.complete
+            ) {
+              decoder = new FountainDecoder();
+              decoderRef.current = decoder;
+              setReceived(0);
+              setTotal(null);
+            }
             decoder.add(frame);
             setReceived(decoder.solvedCount);
             setTotal(decoder.total);
             if (decoder.complete) {
-              void handleComplete();
+              handleComplete();
             }
           },
         );
@@ -166,7 +196,7 @@ export default function QrReceiveScreen() {
       cancelled = true;
       controlsRef.current?.stop();
     };
-  }, []);
+  }, [runIngest]);
 
   return (
     <div
@@ -196,6 +226,16 @@ export default function QrReceiveScreen() {
           >
             <CameraOff className="size-10 shrink-0" aria-hidden />
             <p className="text-base font-medium">{errorMessage ?? 'Something went wrong.'}</p>
+            {canRetry ? (
+              <button
+                type="button"
+                data-testid="qr-receive-retry"
+                onClick={() => void runIngest()}
+                className="mt-1 inline-flex min-h-[44px] items-center gap-2 rounded-md border border-destructive/50 px-4 text-sm font-medium text-destructive hover:bg-destructive/15"
+              >
+                <RotateCcw className="size-4" /> Retry upload
+              </button>
+            ) : null}
           </div>
         ) : phase === 'done' ? (
           <div

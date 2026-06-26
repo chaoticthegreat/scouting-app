@@ -128,12 +128,15 @@ function emptyReport(p: PitScoutScreenProps): PitReport {
 }
 
 // Parse a number input into `number | null` (empty / invalid → null) so partial
-// entries never coerce to 0 or NaN in the report.
+// entries never coerce to 0 or NaN in the report. Every numeric pit field (battery/
+// charger counts, robot dimensions) is non-negative (the inputs carry min={0}), so
+// floor at 0 — the min attribute alone doesn't stop a typed/pasted "-5".
 function parseNum(v: string): number | null {
   const t = v.trim();
   if (t === '') return null;
   const n = Number(t);
-  return Number.isFinite(n) ? n : null;
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, n);
 }
 
 export default function PitScoutScreen(props: PitScoutScreenProps): JSX.Element {

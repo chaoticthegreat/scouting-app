@@ -156,22 +156,6 @@ function FuelLowConfidenceChip() {
   );
 }
 
-/** A live indicator (a pulsing dot) shown when Nexus data is feeding. */
-function LiveBadge() {
-  return (
-    <span
-      data-testid="dash-next-live"
-      className="inline-flex items-center gap-1.5 rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success"
-    >
-      <span className="relative flex size-2">
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
-        <span className="relative inline-flex size-2 rounded-full bg-success" />
-      </span>
-      Live
-    </span>
-  );
-}
-
 /** Compress a match label to broadcast form: "Qualification 15"/"Qual 15" → "Q15". */
 function shortMatchLabel(label: string): string {
   const m = /(\d+)\s*$/.exec(label);
@@ -804,7 +788,6 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
           <div className="rounded-xl bg-red-600 px-6 py-6 text-white">
             <div className="flex items-center justify-between gap-2">
               <span className="text-base font-semibold">{baseTeam} Next Match</span>
-              {nexusLive ? <LiveBadge /> : null}
             </div>
             <div
               data-testid="dash-next-title"
@@ -827,7 +810,6 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
               <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 Upcoming
               </div>
-              {nexusLive ? <LiveBadge /> : null}
             </div>
             {upcoming.length === 0 ? (
               <p className="text-sm text-muted-foreground">No upcoming matches for {baseTeam}.</p>

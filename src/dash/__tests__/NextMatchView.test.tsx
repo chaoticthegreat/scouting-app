@@ -511,7 +511,7 @@ describe('NextMatchView', () => {
     expect(redPct).toBeLessThan(50);
   });
 
-  it('shows a live indicator and Nexus-fed upcoming list when Nexus is available', () => {
+  it('renders the Nexus-fed upcoming list when Nexus is available', () => {
     setupHappyPath(true);
     useNexusEventStatusMock.mockReturnValue(
       dataResult({
@@ -548,10 +548,8 @@ describe('NextMatchView', () => {
       }),
     );
 
-    const { getAllByTestId, getByTestId } = render(<NextMatchView eventKey="2026evt" />);
-    // Live badge present (hero + upcoming).
-    expect(getAllByTestId('dash-next-live').length).toBeGreaterThan(0);
-    // Nexus-fed upcoming list rendered.
+    const { getByTestId } = render(<NextMatchView eventKey="2026evt" />);
+    // Nexus-fed upcoming list rendered (no live badge — those were removed).
     expect(getByTestId('dash-next-upcoming')).toBeTruthy();
   });
 });

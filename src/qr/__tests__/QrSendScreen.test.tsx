@@ -4,17 +4,22 @@ import { MemoryRouter } from 'react-router-dom';
 
 // Hoisted mock fns — vi.mock factories run before module-level consts, so the
 // shared spies must come from vi.hoisted().
-const { toDataURL, getSyncQueue } = vi.hoisted(() => ({
-  toDataURL: vi.fn(async (_text: string) => 'data:image/png;base64,STUB'),
+const { toCanvas, getSyncQueue } = vi.hoisted(() => ({
+  // toCanvas(canvasEl, text, opts) — capture the payload string (2nd arg) so we
+  // can decode the fountain stream. Resolves so the screen's `void` await is happy.
+  toCanvas: vi.fn(async (_canvas: unknown, _text: string) => undefined),
   getSyncQueue: vi.fn(),
 }));
 
-// Mock qrcode so we never touch a canvas in jsdom — toDataURL resolves a stub.
-// It captures the payload string it was asked to render so we can decode it.
+// Mock qrcode so we never touch a real canvas in jsdom — the screen now draws
+// straight to a canvas via toCanvas (no PNG data URL / <img> reload).
 vi.mock('qrcode', () => ({
-  default: { toDataURL },
-  toDataURL,
+  default: { toCanvas },
+  toCanvas,
 }));
+
+// The payload string each render handed to toCanvas (2nd positional arg).
+const renderedPayloads = (): string[] => toCanvas.mock.calls.map((c) => c[1] as string);
 
 // getSyncQueue lives in @/db/localStore. The focused test mocks it so the screen
 // has a deterministic backlog without IndexedDB. It returns camelCase
@@ -42,7 +47,24 @@ if (!globalThis.crypto?.randomUUID) {
 import QrSendScreen from '@/qr/QrSendScreen';
 import { QR_FRAME_MS } from '@/sync/constants';
 import { parseFrame, FountainDecoder, bytesToReports } from '@/qr/envelope';
+import { rememberScoutIdentity } from '@/roster/scoutIdentityCache';
 import { sampleLocalReports, sampleUpsertPayloads } from './fixtures';
+
+// A working in-memory localStorage — jsdom-compat's is non-functional, so the
+// identity cache (and thus scout_name tagging) is inert unless we install one.
+function installMemoryLocalStorage(): void {
+  const store = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+    key: (i: number) => Array.from(store.keys())[i] ?? null,
+    get length() {
+      return store.size;
+    },
+  });
+}
 
 // The backlog as it lives in the store (camelCase LocalMatchReports).
 const backlog = sampleLocalReports();
@@ -51,17 +73,18 @@ const backlog = sampleLocalReports();
 const expectedWire = sampleUpsertPayloads();
 
 beforeEach(() => {
-  toDataURL.mockClear();
+  toCanvas.mockClear();
   getSyncQueue.mockReset();
 });
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe('QrSendScreen', () => {
-  it('renders the qr-send screen and a frame image from the backlog', async () => {
+  it('renders the qr-send screen and draws a frame canvas from the backlog', async () => {
     getSyncQueue.mockResolvedValue(backlog);
     render(
       <MemoryRouter>
@@ -69,9 +92,9 @@ describe('QrSendScreen', () => {
       </MemoryRouter>,
     );
     expect(screen.getByTestId('qr-send')).toBeTruthy();
-    const img = await screen.findByTestId('qr-frame');
-    expect(img.getAttribute('src')).toBe('data:image/png;base64,STUB');
-    expect(toDataURL).toHaveBeenCalled();
+    const canvas = await screen.findByTestId('qr-frame');
+    expect(canvas.tagName).toBe('CANVAS');
+    await waitFor(() => expect(toCanvas).toHaveBeenCalled());
   });
 
   it('emits fountain symbols that decode to SNAKE_CASE wire payloads, not camelCase', async () => {
@@ -102,9 +125,9 @@ describe('QrSendScreen', () => {
 
     // Feed every rendered symbol into a fountain decoder — ANY ~K of them suffice.
     const decoder = new FountainDecoder();
-    for (const c of toDataURL.mock.calls) {
+    for (const payload of renderedPayloads()) {
       if (decoder.complete) break;
-      const f = parseFrame(c[0] as string);
+      const f = parseFrame(payload);
       if (f) decoder.add(f);
     }
     expect(decoder.complete).toBe(true);
@@ -117,6 +140,53 @@ describe('QrSendScreen', () => {
     expect(first).toHaveProperty('scout_id', 'scout1');
     expect(first).not.toHaveProperty('eventKey');
     expect(first).not.toHaveProperty('scoutId');
+  });
+
+  it('tags each frame with scout_name when this device knows the scouter', async () => {
+    vi.useFakeTimers();
+    installMemoryLocalStorage();
+    // Backlog reports are authored by scout id 'scout1'; remember its identity so
+    // the QR sender can re-attach the name on the receiver.
+    rememberScoutIdentity({
+      id: 'scout1',
+      event_key: '2026casnv',
+      display_name: 'Ada Lovelace',
+      auth_uid: 'uid-1',
+      created_at: '2026-06-23T00:00:00.000Z',
+    });
+    getSyncQueue.mockResolvedValue(backlog);
+    render(
+      <MemoryRouter>
+        <QrSendScreen />
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    for (let i = 0; i < 80; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => {
+        vi.advanceTimersByTime(QR_FRAME_MS);
+        await Promise.resolve();
+      });
+    }
+
+    const decoder = new FountainDecoder();
+    for (const payload of renderedPayloads()) {
+      if (decoder.complete) break;
+      const f = parseFrame(payload);
+      if (f) decoder.add(f);
+    }
+    expect(decoder.complete).toBe(true);
+    const decoded = bytesToReports(decoder.payloadBytes()) as Record<string, unknown>[];
+    // Every report carries the resolved name AND keeps the full wire shape.
+    for (const r of decoded) {
+      expect(r).toHaveProperty('scout_name', 'Ada Lovelace');
+      expect(r).toHaveProperty('scout_id', 'scout1');
+    }
   });
 
   it('shows an empty state when the queue is empty', async () => {

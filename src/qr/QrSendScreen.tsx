@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { Button } from '@/components/ui/button';
 import { getSyncQueue } from '@/db/localStore';
 import { toUpsertPayload } from '@/sync/mapReport';
+import { getCachedDisplayNameForScoutId } from '@/roster/scoutIdentityCache';
 import { FountainEncoder, frameToString, reportsToBytes } from '@/qr/envelope';
 import { compressForQr } from '@/qr/compress';
 import { QR_FRAME_MS } from '@/sync/constants';
@@ -18,18 +19,28 @@ export default function QrSendScreen() {
   const [encoder, setEncoder] = useState<FountainEncoder | null>(null);
   const [isEmpty, setIsEmpty] = useState(false);
   const [seq, setSeq] = useState(0);
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Build the fountain encoder once from the backlog. The wire payload is the
   // SAME snake_case object the online outbox sends (toUpsertPayload) — NOT the
   // camelCase LocalMatchReport — so the receiver's ingest path reads the right
-  // keys. sid is a fresh short per-hand-off id (crypto.randomUUID() is the
-  // runtime source; envelope.ts stays pure).
+  // keys. We additionally tag each report with `scout_name` (best-effort, from
+  // this device's identity cache): the receiver can't resolve a FOREIGN device's
+  // `scout_id` (those rows are per-device and get consolidated by
+  // select_scouter), so the name is what lets ingest re-attach the report to the
+  // right scouter instead of dead-lettering it. The online outbox never carries
+  // this field, so the shared wire shape is unchanged. sid is a fresh short
+  // per-hand-off id (crypto.randomUUID() is the runtime source; envelope.ts
+  // stays pure).
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const queue = (await getSyncQueue()).map(toUpsertPayload);
+      const queue = (await getSyncQueue()).map((r) => {
+        const payload = toUpsertPayload(r);
+        const name = getCachedDisplayNameForScoutId(r.scoutId);
+        return name ? { ...payload, scout_name: name } : payload;
+      });
       if (cancelled) return;
       if (queue.length === 0) {
         setIsEmpty(true);
@@ -55,21 +66,18 @@ export default function QrSendScreen() {
     return () => clearInterval(timer);
   }, [encoder, paused]);
 
-  // Render the current symbol to a PNG data URL whenever it changes. Rendered at
-  // a higher internal resolution than the 320px display box so each module stays
-  // crisp when the camera samples it.
+  // Draw the current symbol STRAIGHT to a canvas (not a PNG data URL fed to an
+  // <img>): the img path re-decodes a base64 PNG every frame and flashes white
+  // between swaps, which both looks clunky and starves the receiver of a clean
+  // frame at the fast cadence. Canvas draws in place, so frames swap instantly.
+  // 'L' error correction keeps the code as sparse as possible — the screen→camera
+  // channel is clean and fountain coding already tolerates dropped frames, so
+  // heavy ECC would only add modules and slow the camera's lock.
   useEffect(() => {
-    if (!encoder) return;
+    const canvas = canvasRef.current;
+    if (!encoder || !canvas) return;
     const payload = frameToString(encoder.frame(seq));
-    let cancelled = false;
-    void QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 2, width: 512 }).then(
-      (url) => {
-        if (!cancelled) setDataUrl(url);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
+    void QRCode.toCanvas(canvas, payload, { errorCorrectionLevel: 'L', margin: 2, width: 400 });
   }, [encoder, seq]);
 
   return (
@@ -83,8 +91,8 @@ export default function QrSendScreen() {
           <h1 className="text-2xl font-bold">Send over QR</h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          Point the receiving device&apos;s camera at the code. Keep this screen open until the
-          receiver shows it has every block — the code keeps changing on purpose.
+          Point the receiving device&apos;s camera at the code. It flips through symbols on its
+          own — leave this screen up until the receiver&apos;s bar is full.
         </p>
       </header>
 
@@ -101,14 +109,12 @@ export default function QrSendScreen() {
       ) : (
         <>
           <div className="flex flex-col items-center gap-3">
-            {dataUrl && (
-              <img
-                data-testid="qr-frame"
-                src={dataUrl}
-                alt={`QR fountain symbol ${seq + 1}`}
-                className="aspect-square w-full max-w-[20rem] rounded-lg bg-white p-2"
-              />
-            )}
+            <canvas
+              ref={canvasRef}
+              data-testid="qr-frame"
+              aria-label={`QR fountain symbol ${seq + 1}`}
+              className="aspect-square w-full max-w-[20rem] rounded-lg bg-white p-2"
+            />
             <span data-testid="qr-send-progress" className="text-lg font-semibold tabular-nums">
               <span className="text-brand">{seq + 1} sent</span>{' '}
               <span className="text-muted-foreground">

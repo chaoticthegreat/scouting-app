@@ -4,6 +4,7 @@ import { Camera, CameraOff, CheckCircle2 } from 'lucide-react';
 import { FountainDecoder, parseFrame, bytesToReports } from '@/qr/envelope';
 import { decompressForQr } from '@/qr/compress';
 import { postIngest } from '@/qr/ingestClient';
+import { QR_SCAN_DELAY_MS } from '@/sync/constants';
 import { BackLink } from '@/components/ui/BackLink';
 
 type Phase = 'scanning' | 'ingesting' | 'done' | 'error';
@@ -42,6 +43,8 @@ export default function QrReceiveScreen() {
   const [total, setTotal] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase>('scanning');
   const [ingested, setIngested] = useState<number | null>(null);
+  const [failedCount, setFailedCount] = useState(0);
+  const [failedError, setFailedError] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -63,7 +66,15 @@ export default function QrReceiveScreen() {
       return;
     }
 
-    const reader = new BrowserQRCodeReader();
+    // zxing sleeps `delayBetweenScanAttempts`/`delayBetweenScanSuccess` (BOTH
+    // 500ms by default) between decodes, which throttled the receiver to ~2
+    // frames/sec — the dominant QR-transfer bottleneck. Drop both so we decode
+    // at roughly camera frame rate; with fountain coding every extra symbol we
+    // capture shortens the hand-off.
+    const reader = new BrowserQRCodeReader(undefined, {
+      delayBetweenScanAttempts: QR_SCAN_DELAY_MS,
+      delayBetweenScanSuccess: QR_SCAN_DELAY_MS,
+    });
 
     const handleComplete = async () => {
       // Guard against the callback firing again after we've already finished.
@@ -79,7 +90,19 @@ export default function QrReceiveScreen() {
         const result = await postIngest(reports);
         if (cancelled) return;
         setIngested(result.ingested);
-        setPhase('done');
+        setFailedCount(result.failed.length);
+        setFailedError(result.failed[0]?.error ?? null);
+        // Everything decoded but the server rejected every row → that's a
+        // failure, not a quiet "0 uploaded". Surface it so the scout knows the
+        // backlog did NOT land and can retry / report it.
+        setPhase(result.ingested === 0 && result.failed.length > 0 ? 'error' : 'done');
+        if (result.ingested === 0 && result.failed.length > 0) {
+          setErrorMessage(
+            `Server rejected all ${result.failed.length} report${
+              result.failed.length === 1 ? '' : 's'
+            }: ${result.failed[0]?.error ?? 'unknown error'}`,
+          );
+        }
       } catch (err) {
         if (cancelled) return;
         setErrorMessage(err instanceof Error ? err.message : 'Failed to upload reports.');
@@ -159,8 +182,8 @@ export default function QrReceiveScreen() {
         <div className="min-w-0">
           <h1 className="break-words text-xl font-bold leading-tight sm:text-2xl">Receive over QR</h1>
           <p className="text-sm text-muted-foreground">
-            Point at the sending device&apos;s screen. Keep both still until every frame is
-            captured.
+            Aim at the sending device&apos;s screen. The codes cycle on their own — a missed one
+            is fine, just hold it roughly in frame until the bar fills.
           </p>
         </div>
       </header>
@@ -183,6 +206,12 @@ export default function QrReceiveScreen() {
             <p className="text-lg font-semibold">
               Received and uploaded {ingested ?? 0} report{ingested === 1 ? '' : 's'}.
             </p>
+            {failedCount > 0 && (
+              <p data-testid="qr-receive-partial" className="text-sm font-medium text-energy">
+                {failedCount} report{failedCount === 1 ? '' : 's'} could not be uploaded
+                {failedError ? ` (${failedError})` : ''}.
+              </p>
+            )}
           </div>
         ) : (
           <>
@@ -197,7 +226,7 @@ export default function QrReceiveScreen() {
               muted
               playsInline
             />
-            <div className="flex flex-col items-center gap-2 landscape:items-start">
+            <div className="flex w-full max-w-sm flex-col items-center gap-2 landscape:items-start">
               <span
                 data-testid="qr-receive-progress"
                 className={`text-2xl font-bold tabular-nums ${
@@ -206,6 +235,18 @@ export default function QrReceiveScreen() {
               >
                 {received}/{total ?? '?'}
               </span>
+              {/* Fill bar: maps decoded blocks → percent so the user has a clear
+                  "how much longer" signal instead of bare counts. */}
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`h-full rounded-full transition-[width] duration-150 ${
+                    total !== null && received >= total ? 'bg-success' : 'bg-brand'
+                  }`}
+                  style={{
+                    width: total ? `${Math.min(100, Math.round((received / total) * 100))}%` : '0%',
+                  }}
+                />
+              </div>
               <span className="text-sm text-muted-foreground">blocks decoded</span>
               {phase === 'ingesting' && (
                 <p className="text-sm font-medium text-energy">Uploading received reports…</p>

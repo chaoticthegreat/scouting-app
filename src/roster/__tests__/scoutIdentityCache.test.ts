@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   rememberScoutIdentity,
   getCachedScoutIdentity,
+  getCachedDisplayNameForScoutId,
 } from '../scoutIdentityCache';
 
 const scoutRow = {
@@ -54,6 +55,19 @@ describe('scoutIdentityCache', () => {
     rememberScoutIdentity({ ...scoutRow, id: 's2', event_key: '2026other' });
     expect(getCachedScoutIdentity('2026demo', 'Ada Lovelace')?.id).toBe('s1');
     expect(getCachedScoutIdentity('2026other', 'Ada Lovelace')?.id).toBe('s2');
+  });
+
+  it('reverse-looks-up a display name by scout_id (for QR tagging)', () => {
+    rememberScoutIdentity(scoutRow);
+    rememberScoutIdentity({ ...scoutRow, id: 's2', event_key: '2026other' });
+    expect(getCachedDisplayNameForScoutId('s1')).toBe('Ada Lovelace');
+    expect(getCachedDisplayNameForScoutId('s2')).toBe('Ada Lovelace');
+  });
+
+  it('returns null reverse-looking-up an unknown or empty scout_id', () => {
+    rememberScoutIdentity(scoutRow);
+    expect(getCachedDisplayNameForScoutId('nope')).toBeNull();
+    expect(getCachedDisplayNameForScoutId('')).toBeNull();
   });
 
   it('ignores malformed rows', () => {

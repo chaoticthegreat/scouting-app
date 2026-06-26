@@ -67,3 +67,21 @@ export function getCachedScoutIdentity(eventKey: string, name: string): ScoutRow
   const map = readAll();
   return map[keyFor(eventKey, name)] ?? null;
 }
+
+/**
+ * Reverse lookup: the server-confirmed display name for a given `scout_id`, or
+ * null when this device has never cached that id. Used by the QR sender to tag
+ * each outbound report with its scouter NAME — the receiver's ingest path can't
+ * resolve a foreign device's `scout_id` (those rows are per-device and get
+ * consolidated by select_scouter), but it CAN re-attach the report to the right
+ * scouter by name. Best-effort: a miss just means the report ingests under a
+ * generic "Imported scout" identity instead of failing.
+ */
+export function getCachedDisplayNameForScoutId(scoutId: string): string | null {
+  if (!scoutId) return null;
+  const map = readAll();
+  for (const row of Object.values(map)) {
+    if (row?.id === scoutId && row.display_name) return row.display_name;
+  }
+  return null;
+}

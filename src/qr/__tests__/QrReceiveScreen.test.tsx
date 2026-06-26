@@ -174,6 +174,36 @@ describe('QrReceiveScreen', () => {
     );
   });
 
+  it('surfaces an error (not a silent "0 uploaded") when the server rejects every report', async () => {
+    // The decode succeeds but ingest rejects all rows — the old UI showed a green
+    // "uploaded 0 reports", hiding the failure. It must now read as an error.
+    postIngest.mockResolvedValue({
+      ingested: 0,
+      failed: sourceReports.map((_, index) => ({ index, error: 'invalid scout_id: no such scout' })),
+    });
+
+    render(
+      <MemoryRouter>
+        <QrReceiveScreen />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(captured).not.toBeNull());
+
+    for (let i = 0; i < frameStrings.length; i += 1) {
+      if (screen.queryByTestId('qr-receive-error')) break;
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => emit(frameStrings[i]));
+    }
+
+    const error = await screen.findByTestId('qr-receive-error');
+    expect(error).toBeTruthy();
+    expect(error.textContent).toMatch(/rejected all/i);
+    expect(error.textContent).toMatch(/invalid scout_id/i);
+    // It must NOT render the success view.
+    expect(screen.queryByTestId('qr-receive-done')).toBeNull();
+    expect(postIngest).toHaveBeenCalledTimes(1);
+  });
+
   it('surfaces a camera-permission denial as a visible error', async () => {
     reject();
     render(

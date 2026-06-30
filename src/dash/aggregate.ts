@@ -1035,6 +1035,20 @@ function maxReceivedAt(rows: MsrRow[]): string | null {
  * re-scanning all reports per match). `bucket` is the live (non-deleted) rows
  * for `matchKey`.
  */
+/**
+ * Distinct scouter identities by display name (case/space-insensitive). A single
+ * person can have more than one `scout` row (a duplicate/stale identity from
+ * name re-pick or two-device sign-in), so counting raw rows over-states how many
+ * scouters there actually are. Deduping by name matches the roster the lead sees.
+ */
+function distinctScouterCount(scouts: ScoutLite[]): number {
+  const names = new Set<string>();
+  // Null/blank name → fall back to the unique id so anomalous unnamed rows stay
+  // distinct (matching the old raw-row count) while real duplicate names collapse.
+  for (const s of scouts) names.add((s.display_name ?? s.id).trim().toLowerCase());
+  return names.size;
+}
+
 function coverageFromBucket(
   bucket: MsrRow[],
   matchKey: string,
@@ -1052,10 +1066,16 @@ function coverageFromBucket(
   const missingScouts: ScoutLite[] = scouts
     .filter((s) => !reportedScoutIds.has(s.id))
     .map((s) => ({ id: s.id, display_name: s.display_name }));
+  // Count by distinct SCOUTER (display name), not raw scout rows: a person can
+  // own >1 scout row (duplicate/stale identity), which would otherwise inflate
+  // the "X/Y scouts" denominator above the roster the lead actually sees.
+  const nameById = new Map(scouts.map((s) => [s.id, (s.display_name ?? s.id).trim().toLowerCase()]));
+  const reportedNames = new Set<string>();
+  for (const id of reportedScoutIds) reportedNames.add(nameById.get(id) ?? id);
   return {
     matchKey,
-    scoutsCovered: reportedScoutIds.size,
-    scoutsTotal: scouts.length,
+    scoutsCovered: reportedNames.size,
+    scoutsTotal: distinctScouterCount(scouts),
     lastReportAt: maxReceivedAt(bucket),
     reportedScoutIds: Array.from(reportedScoutIds),
     missingScouts,
@@ -1115,5 +1135,5 @@ export function eventScoutCoverage(
   for (const [matchKey, bucket] of byMatch) {
     coverageByMatch.set(matchKey, coverageFromBucket(bucket, matchKey, scouts, stationCap));
   }
-  return { coverageByMatch, lastReportAt: globalIso, scoutsTotal: scouts.length };
+  return { coverageByMatch, lastReportAt: globalIso, scoutsTotal: distinctScouterCount(scouts) };
 }

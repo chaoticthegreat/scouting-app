@@ -2,10 +2,11 @@
 // Presentational scout-heartbeat tile for the NextMatchView right column. Pure /
 // prop-driven (no hooks) — the parent supplies coverage, the global last-report
 // stamp, online/pending from useSync(), and a ticking `nowMs` clock. Answers
-// "how many of the match's 6 STATIONS have a report + when did the last report
-// land", and is offline-aware (shows pending + an offline note). Coverage is
-// measured in stations (6 = 3 red + 3 blue), never scout-count, so the count and
-// its aria/title denominator always agree.
+// "how covered is the data + when did the last report land", and is offline-aware
+// (shows pending + an offline note). The `unit` prop picks what the big count
+// measures: `stations` (Next Match → out of 6 robot stations) or `scouts`
+// (Scouters tab → distinct scouters synced out of the roster). Within each mode
+// the number, tone, and aria/title denominator always agree.
 
 import { cn } from '@/lib/utils';
 import { relativeTime } from '@/dash/relativeTime';
@@ -21,6 +22,13 @@ export interface ScoutHeartbeatProps {
   nowMs: number;
   /** label of the anchored match, e.g. "Q12" (for the sublabel) */
   heroLabel?: string;
+  /**
+   * What the big count measures. `stations` (default) = per-match coverage out of
+   * 6 robot stations (Next Match). `scouts` = how many distinct scouters have
+   * synced out of the roster — used on the Scouters tab, where the lead is reading
+   * the count against the scouter list right below it.
+   */
+  unit?: 'stations' | 'scouts';
 }
 
 type Tone = 'red' | 'amber' | 'green';
@@ -44,13 +52,21 @@ export default function ScoutHeartbeat({
   pending,
   nowMs,
   heroLabel,
+  unit = 'stations',
 }: ScoutHeartbeatProps): JSX.Element {
-  // COVERAGE is measured in STATIONS (6 per match: 3 red + 3 blue), NOT scouts —
-  // a roster of 5 still fully covers a match's 6 stations. The big number, its
-  // tone, and the title all key off stationsCovered/6 so the denominator and the
-  // aria/title agree (BUG-9: was scoutsCovered/scoutsTotal vs a /6 title).
-  const stationsCovered = Math.min(coverage.stationsCovered, COVERAGE_STATION_CAP);
-  const tone = toneFor(stationsCovered, COVERAGE_STATION_CAP);
+  // Two coherent modes (number, tone, and aria/title always agree within each):
+  //  - 'stations' (Next Match): per-match coverage out of 6 robot stations.
+  //  - 'scouts' (Scouters tab): distinct scouters synced out of the roster. Counts
+  //    are deduped by name upstream, so a duplicate scout row can't push the
+  //    denominator above the roster the lead sees (e.g. "0/3", not "0/4").
+  const scoutsTotal = Math.max(0, coverage.scoutsTotal);
+  const covered =
+    unit === 'scouts'
+      ? Math.min(coverage.scoutsCovered, scoutsTotal)
+      : Math.min(coverage.stationsCovered, COVERAGE_STATION_CAP);
+  const total = unit === 'scouts' ? scoutsTotal : COVERAGE_STATION_CAP;
+  const unitNoun = unit === 'scouts' ? 'scouts synced' : 'stations reported';
+  const tone = toneFor(covered, total);
 
   // Per-match stamp when this match has reports, else the global event stamp so a
   // brand-new upcoming match isn't just "no reports yet".
@@ -84,13 +100,13 @@ export default function ScoutHeartbeat({
           <span
             data-testid="scout-heartbeat-count"
             className={cn('text-3xl font-black leading-none tabular-nums', TONE_TEXT[tone])}
-            aria-label={`${stationsCovered}/${COVERAGE_STATION_CAP} stations reported`}
-            title={`${stationsCovered}/${COVERAGE_STATION_CAP} stations reported`}
+            aria-label={`${covered}/${total} ${unitNoun}`}
+            title={`${covered}/${total} ${unitNoun}`}
           >
-            {stationsCovered}/{COVERAGE_STATION_CAP}
+            {covered}/{total}
           </span>
           <span className="mt-0.5 text-xs text-muted-foreground">
-            stations reported{heroLabel ? ` for ${heroLabel}` : ''}
+            {unitNoun}{heroLabel ? ` for ${heroLabel}` : ''}
           </span>
         </div>
         <div className="flex flex-col items-end text-right">

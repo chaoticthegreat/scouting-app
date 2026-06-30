@@ -715,4 +715,24 @@ describe('eventScoutCoverage', () => {
     expect(ev.scoutsTotal).toBe(0);
     expect(ev.coverageByMatch.get('qm1')!.missingScouts).toEqual([]);
   });
+
+  it('counts distinct SCOUTERS by name — a duplicate scout row for one person does not inflate scoutsTotal', () => {
+    // Two `scout` rows for the same person (duplicate/stale identity), as happens
+    // with a name re-pick or two-device sign-in. The roster shows 3 names; the
+    // heartbeat denominator must read 3, not 4 (the raw row count).
+    const dupRoster: ScoutLite[] = [
+      { id: 'A', display_name: 'Ada' },
+      { id: 'B', display_name: 'Bo' },
+      { id: 'C1', display_name: 'Cy' },
+      { id: 'C2', display_name: 'cy' }, // same person, different row (case-insensitive)
+    ];
+    const reports: MsrRow[] = [
+      row({ match_key: 'qm1', scout_id: 'A', station: 1, server_received_at: '2026-06-29T10:00:00Z' }),
+      row({ match_key: 'qm1', scout_id: 'C2', station: 2, server_received_at: '2026-06-29T10:01:00Z' }),
+    ];
+    const ev = eventScoutCoverage(reports, dupRoster);
+    expect(ev.scoutsTotal).toBe(3); // Ada, Bo, Cy — not 4
+    // Cy reported once (via the C2 row); covered counts the person once, not twice.
+    expect(ev.coverageByMatch.get('qm1')!.scoutsCovered).toBe(2);
+  });
 });

@@ -30,7 +30,9 @@ export function emptyMatchCoverage(
   return {
     matchKey,
     scoutsCovered: 0,
-    scoutsTotal: scouts.length,
+    // Distinct scouter identities by name (a person can own >1 scout row); raw
+    // row count would over-state the roster the lead sees.
+    scoutsTotal: new Set(scouts.map((s) => (s.display_name ?? s.id).trim().toLowerCase())).size,
     lastReportAt: null,
     reportedScoutIds: [],
     missingScouts: scouts.map((s) => ({ id: s.id, display_name: s.display_name })),

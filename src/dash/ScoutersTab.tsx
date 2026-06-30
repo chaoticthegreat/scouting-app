@@ -562,6 +562,7 @@ export default function ScoutersTab(props: ScoutersTabProps): JSX.Element {
           online={sync.online}
           pending={sync.queued}
           nowMs={nowMs}
+          unit="scouts"
           heroLabel={heartbeatAnchor ? formatMatchKeyRaw(heartbeatAnchor.matchKey) : undefined}
         />
       ) : null}

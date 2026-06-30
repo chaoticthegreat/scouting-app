@@ -9,6 +9,16 @@ roles (no login wall): **Scout** captures match/pit data from the stands; **Lead
 turns it into live, broadcast-style strategy. The whole point is surviving a bad venue
 network — local-first storage, persisted caches, and QR device-to-device transfer.
 
+## Porting to a new season
+
+This app is the 2026 REBUILT instantiation of a game-agnostic scouting engine. To adapt it
+to a future year's game (drop in `<YEAR>GameManual.pdf`), follow **`docs/game-migration/`**
+— a phased playbook: extract manual → write game-reference → fill the slot Decision Sheet →
+implement from the change catalog → verify/deploy. Start at `docs/game-migration/README.md`.
+The one hard invariant: scoring logic is duplicated across the client (`src/scoring/`), the
+`upsert_match_report` RPC, and `seed-demo`, and they must stay byte-equivalent
+(see `docs/game-migration/04-scoring-sync-contract.md`).
+
 ## Commands
 
 ```bash

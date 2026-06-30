@@ -1,11 +1,29 @@
 // src/dash/PicklistView.tsx
 // Cluster PICKLIST (contracts §6 client, §8 export/testids).
 // Editable, reorderable picklist backed by the shared staff-RLS'd `picklist`
-// table. Loads on mount, edits live in local ordered state, and an explicit
-// save upserts the whole list. JSON/CSV export via exportDash. Dark theme,
-// shadcn primitives, 44px min touch targets.
+// table. Loads on mount, edits live in local ordered state, and AUTOSAVE
+// debounce-upserts the whole list after any change (no manual Save button).
+// Rows reorder by drag-and-drop (grip handle) or the ↑/↓ buttons. JSON/CSV
+// export via exportDash. Dark theme, shadcn primitives, 44px min touch targets.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { GripVertical } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -62,6 +80,140 @@ export function validateAddTeam(
   return { ok: true, teamNumber: n };
 }
 
+interface PickRowProps {
+  entry: PicklistEntry;
+  index: number;
+  total: number;
+  onMove: (index: number, delta: number) => void;
+  onRemove: (teamNumber: number) => void;
+  onUpdateField: (teamNumber: number, field: 'tier' | 'note', value: string) => void;
+  onCycleTier: (teamNumber: number) => void;
+}
+
+/**
+ * One picklist row, made sortable via dnd-kit (`useSortable`). The grip is the
+ * drag activator (pointer + keyboard); the row translates with the live
+ * transform so reordering is smooth. The ↑/↓ buttons remain as a non-drag
+ * fallback. Pure presentational + the passed-in mutators.
+ */
+function SortablePickRow(props: PickRowProps): JSX.Element {
+  const { entry: e, index: i, total, onMove, onRemove, onUpdateField, onCycleTier } = props;
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
+    useSortable({ id: e.teamNumber });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      data-testid={`pick-row-${e.teamNumber}`}
+      className={cn(
+        'grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg border border-border/60 bg-background/40 p-2 sm:flex sm:flex-nowrap',
+        isDragging && 'relative z-10 opacity-90 shadow-lg ring-1 ring-brand/50',
+      )}
+    >
+      <span className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          ref={setActivatorNodeRef}
+          {...attributes}
+          {...listeners}
+          data-testid={`pick-drag-${e.teamNumber}`}
+          aria-label={`Drag team ${e.teamNumber} to reorder`}
+          className="cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <GripVertical className="size-4" />
+        </button>
+        <span
+          className={cn(
+            'w-6 text-right tabular-nums',
+            i < 3 ? 'font-semibold text-brand' : 'text-muted-foreground',
+          )}
+        >
+          {i + 1}
+        </span>
+      </span>
+      <span className="min-w-0 shrink-0 font-medium tabular-nums sm:w-16">{e.teamNumber}</span>
+
+      {/* Move / remove controls: a contained group so on mobile they sit together
+          on their own grid row instead of wrapping the destructive ✕ off alone. */}
+      <div className="col-start-3 row-span-2 flex shrink-0 items-center gap-1 sm:row-span-1 sm:contents">
+        <div className="flex shrink-0 gap-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            data-testid={`pick-up-${e.teamNumber}`}
+            onClick={() => onMove(i, -1)}
+            disabled={i === 0}
+            aria-label={`Move team ${e.teamNumber} up`}
+            className="h-11 w-11"
+          >
+            ↑
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            data-testid={`pick-down-${e.teamNumber}`}
+            onClick={() => onMove(i, 1)}
+            disabled={i === total - 1}
+            aria-label={`Move team ${e.teamNumber} down`}
+            className="h-11 w-11"
+          >
+            ↓
+          </Button>
+        </div>
+        <Button
+          type="button"
+          variant="destructive"
+          size="icon"
+          data-testid={`pick-remove-${e.teamNumber}`}
+          onClick={() => onRemove(e.teamNumber)}
+          aria-label={`Remove team ${e.teamNumber}`}
+          className="h-11 w-11 shrink-0 sm:order-last"
+        >
+          ✕
+        </Button>
+      </div>
+
+      <Input
+        type="text"
+        data-testid={`pick-note-${e.teamNumber}`}
+        value={e.note ?? ''}
+        onChange={(ev) => onUpdateField(e.teamNumber, 'note', ev.target.value)}
+        placeholder="Note"
+        aria-label={`Note for team ${e.teamNumber}`}
+        className="col-span-2 h-11 w-full min-w-0 sm:flex-1"
+      />
+
+      {/* Structured pick tier: 1st / 2nd / —. */}
+      <div className="col-span-2 flex shrink-0 items-center gap-1 sm:col-span-1">
+        <button
+          type="button"
+          data-testid={`pick-tier-type-${e.teamNumber}`}
+          onClick={() => onCycleTier(e.teamNumber)}
+          aria-label={`Pick tier for team ${e.teamNumber}`}
+          className={cn(
+            'inline-flex h-11 min-w-[44px] items-center justify-center rounded-md border px-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+            (e.tierType ?? null) === 'first'
+              ? 'border-brand bg-brand/20 text-brand'
+              : (e.tierType ?? null) === 'second'
+                ? 'border-amber-500 bg-amber-500/20 text-amber-300'
+                : 'border-border text-muted-foreground',
+          )}
+        >
+          {(e.tierType ?? null) === 'first'
+            ? '1st'
+            : (e.tierType ?? null) === 'second'
+              ? '2nd'
+              : '—'}
+        </button>
+      </div>
+    </li>
+  );
+}
+
 export default function PicklistView(props: PicklistViewProps): JSX.Element {
   const { eventKey } = props;
 
@@ -69,12 +221,23 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [addValue, setAddValue] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  // Autosave status (no manual Save button): the list persists itself ~debounced
+  // after any edit. `idle` until the first change lands.
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [seedOpen, setSeedOpen] = useState(false);
+  // JSON of the last-persisted (or freshly-loaded) entries, so the autosave
+  // effect skips the post-load run and no-op re-saves.
+  const lastSavedRef = useRef<string | null>(null);
+
+  // dnd-kit sensors: pointer drag with a small activation distance (so taps on
+  // the row's inputs/buttons still register), plus keyboard reordering for a11y.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   // Export-preset supporting data. These hooks run on render (cheap, cached by
   // TanStack Query, shared with RankingView's cache keys); only fetchTeamMetadata
@@ -110,11 +273,15 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
   // which is keyed for the per-row export lookup). Cheap; reuses the same cache.
   const aggs = useMemo<TeamAgg[]>(() => Array.from(aggByTeam.values()), [aggByTeam]);
 
-  // Teams already on the picklist — drives the EPA board's added/disabled state.
-  const inListTeams = useMemo(
-    () => new Set(entries.map((e) => e.teamNumber)),
-    [entries],
-  );
+  // Split the entries: real ORDERED picks (the list you reorder) vs do-not-pick
+  // markers. DNP teams aren't picks, so they're kept out of the ordered list and
+  // appended on persist; they surface only as flags on the EPA board + draft.
+  const picks = useMemo(() => entries.filter((e) => !(e.dnp ?? false)), [entries]);
+  const dnpEntries = useMemo(() => entries.filter((e) => e.dnp ?? false), [entries]);
+  // Teams already PICKED (drives the EPA board's added/disabled state).
+  const inListTeams = useMemo(() => new Set(picks.map((e) => e.teamNumber)), [picks]);
+  // Teams flagged do-not-pick (drives the EPA board's DNP toggle state).
+  const dnpTeams = useMemo(() => new Set(dnpEntries.map((e) => e.teamNumber)), [dnpEntries]);
 
   // Live identity preview: the nickname of a valid, not-yet-added event team the
   // lead is currently typing (BUG-11: confirm the team exists before adding).
@@ -130,10 +297,16 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
     setLoading(true);
     getPicklist(eventKey)
       .then((loaded) => {
-        if (!cancelled) setEntries(loaded);
+        if (cancelled) return;
+        setEntries(loaded);
+        // Baseline for autosave: the freshly-loaded list must NOT trigger a save.
+        lastSavedRef.current = JSON.stringify(loaded);
+        setSaveStatus('idle');
       })
       .catch(() => {
-        if (!cancelled) setEntries([]);
+        if (cancelled) return;
+        setEntries([]);
+        lastSavedRef.current = JSON.stringify([]);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -143,10 +316,32 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
     };
   }, [eventKey]);
 
-  // Any edit invalidates the "saved" indicator.
+  // Autosave: debounce-persist whenever the list changes from the last saved
+  // snapshot. No manual Save button — edits land on their own. Skips while
+  // loading and skips no-op re-saves (json === last saved).
+  useEffect(() => {
+    if (loading) return;
+    const json = JSON.stringify(entries);
+    if (json === lastSavedRef.current) return;
+    const timer = setTimeout(() => {
+      setSaveStatus('saving');
+      setSaveError(null);
+      savePicklist(eventKey, entries)
+        .then(() => {
+          lastSavedRef.current = json;
+          setSaveStatus('saved');
+        })
+        .catch((err: unknown) => {
+          setSaveError(err instanceof Error ? err.message : 'Failed to save picklist.');
+          setSaveStatus('error');
+        });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [entries, eventKey, loading]);
+
+  // Edit entry point — autosave reacts to the resulting state change.
   function mutate(next: PicklistEntry[]): void {
     setEntries(next);
-    setSaved(false);
   }
 
   /**
@@ -157,7 +352,13 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
    */
   function addTeamNumber(n: number): boolean {
     if (!Number.isInteger(n) || n <= 0) return false; // invalid
-    if (entries.some((e) => e.teamNumber === n)) return false; // duplicate
+    const existing = entries.find((e) => e.teamNumber === n);
+    if (existing && !(existing.dnp ?? false)) return false; // already a pick
+    // A do-not-pick team being explicitly added flips to a pick (clears DNP).
+    if (existing?.dnp) {
+      mutate(entries.map((e) => (e.teamNumber === n ? { ...e, dnp: false } : e)));
+      return true;
+    }
     mutate([...entries, { teamNumber: n, tier: null, note: null }]);
     return true;
   }
@@ -177,13 +378,30 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
     mutate(entries.filter((e) => e.teamNumber !== teamNumber));
   }
 
+  /**
+   * Reorder within the ORDERED picks (`from`/`to` are indices into `picks`), then
+   * persist picks + the untouched DNP markers appended. Shared by ↑/↓ and DnD.
+   */
+  function reorder(from: number, to: number): void {
+    if (from === to) return;
+    if (from < 0 || to < 0 || from >= picks.length || to >= picks.length) return;
+    const next = [...picks];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    mutate([...next, ...dnpEntries]);
+  }
+
   function move(index: number, delta: number): void {
-    const target = index + delta;
-    if (target < 0 || target >= entries.length) return;
-    const next = [...entries];
-    const [item] = next.splice(index, 1);
-    next.splice(target, 0, item);
-    mutate(next);
+    reorder(index, index + delta);
+  }
+
+  /** dnd-kit drop: reorder by the dragged/over team-number ids (within picks). */
+  function onDragEnd(event: DragEndEvent): void {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const from = picks.findIndex((e) => e.teamNumber === active.id);
+    const to = picks.findIndex((e) => e.teamNumber === over.id);
+    if (from !== -1 && to !== -1) reorder(from, to);
   }
 
   function updateField(teamNumber: number, field: 'tier' | 'note', value: string): void {
@@ -194,13 +412,20 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
     );
   }
 
-  /** Toggle the per-row DNP / avoid flag (independent of tier). */
+  /**
+   * Toggle a team's do-not-pick flag from the EPA board. A team not yet tracked
+   * gets a DNP-only entry; clearing DNP removes that entry entirely (so it never
+   * lingers as a phantom pick). A real pick is never DNP'd from the board (the
+   * board hides the DNP control for picked teams), but the defensive branch keeps
+   * the flag coherent if it ever is.
+   */
   function toggleDnp(teamNumber: number): void {
-    mutate(
-      entries.map((e) =>
-        e.teamNumber === teamNumber ? { ...e, dnp: !(e.dnp ?? false) } : e,
-      ),
-    );
+    setEntries((prev) => {
+      const existing = prev.find((e) => e.teamNumber === teamNumber);
+      if (existing?.dnp) return prev.filter((e) => e.teamNumber !== teamNumber);
+      if (existing) return prev.map((e) => (e.teamNumber === teamNumber ? { ...e, dnp: true } : e));
+      return [...prev, { teamNumber, tier: null, note: null, tierType: null, dnp: true }];
+    });
   }
 
   /** Cycle the structured pick tier: — → 1st → 2nd → —. */
@@ -228,22 +453,6 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
       mutate([...entries, ...seeded.filter((e) => !have.has(e.teamNumber))]);
     }
     setSeedOpen(false);
-  }
-
-  async function onSave(): Promise<void> {
-    setSaving(true);
-    setSaved(false);
-    setSaveError(null);
-    try {
-      await savePicklist(eventKey, entries);
-      setSaved(true);
-    } catch (err) {
-      // Without this, a failed save was a silent unhandled rejection — the lead
-      // thought the picklist saved when it didn't. Surface it so they can retry.
-      setSaveError(err instanceof Error ? err.message : 'Failed to save picklist.');
-    } finally {
-      setSaving(false);
-    }
   }
 
   function onExportJson(): void {
@@ -324,7 +533,12 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
           <CardTitle>Picklist</CardTitle>
           <div className="flex flex-wrap items-center gap-2">
-            {saved ? (
+            {/* Autosave status — the list persists itself; no Save button. */}
+            {saveStatus === 'saving' ? (
+              <span data-testid="pick-saving" className="text-xs text-muted-foreground">
+                Saving…
+              </span>
+            ) : saveStatus === 'saved' ? (
               <span data-testid="pick-saved" className="text-xs text-success">
                 Saved
               </span>
@@ -347,15 +561,6 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
               className={TOUCH}
             >
               Seed
-            </Button>
-            <Button
-              type="button"
-              data-testid="pick-save"
-              onClick={() => void onSave()}
-              disabled={saving}
-              className={TOUCH}
-            >
-              {saving ? 'Saving…' : 'Save'}
             </Button>
             <Button
               type="button"
@@ -457,146 +662,36 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
             ) : null}
           </div>
 
-          {entries.length === 0 ? (
+          {picks.length === 0 ? (
             <div data-testid="pick-empty" className="py-6 text-sm text-muted-foreground">
               No teams in the picklist yet. Add one above.
             </div>
           ) : (
-            <ul className="space-y-2">
-              {entries.map((e, i) => (
-                <li
-                  key={e.teamNumber}
-                  data-testid={`pick-row-${e.teamNumber}`}
-                  className="grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg border border-border/60 bg-background/40 p-2 sm:flex sm:flex-nowrap"
-                >
-                  <span
-                    className={cn(
-                      'w-6 shrink-0 text-right tabular-nums',
-                      i < 3 ? 'font-semibold text-brand' : 'text-muted-foreground',
-                    )}
-                  >
-                    {i + 1}
-                  </span>
-                  <span
-                    className={cn(
-                      'min-w-0 shrink-0 font-medium tabular-nums sm:w-16',
-                      (e.dnp ?? false) && 'line-through opacity-60',
-                    )}
-                  >
-                    {e.teamNumber}
-                    {(e.dnp ?? false) ? (
-                      <span
-                        data-testid={`pick-dnp-badge-${e.teamNumber}`}
-                        className="ml-1 inline-flex items-center rounded-full bg-destructive/20 px-1.5 py-0.5 text-[10px] font-medium text-destructive no-underline"
-                      >
-                        DNP
-                      </span>
-                    ) : null}
-                  </span>
-
-                  {/* Move / remove controls: a contained group so on mobile they
-                      sit together on their own grid row instead of wrapping the
-                      destructive ✕ off on its own line. */}
-                  <div className="col-start-3 row-span-2 flex shrink-0 items-center gap-1 sm:row-span-1 sm:contents">
-                    <div className="flex shrink-0 gap-1">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        data-testid={`pick-up-${e.teamNumber}`}
-                        onClick={() => move(i, -1)}
-                        disabled={i === 0}
-                        aria-label={`Move team ${e.teamNumber} up`}
-                        className="h-11 w-11"
-                      >
-                        ↑
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        data-testid={`pick-down-${e.teamNumber}`}
-                        onClick={() => move(i, 1)}
-                        disabled={i === entries.length - 1}
-                        aria-label={`Move team ${e.teamNumber} down`}
-                        className="h-11 w-11"
-                      >
-                        ↓
-                      </Button>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="icon"
-                      data-testid={`pick-remove-${e.teamNumber}`}
-                      onClick={() => removeTeam(e.teamNumber)}
-                      aria-label={`Remove team ${e.teamNumber}`}
-                      className="h-11 w-11 shrink-0 sm:order-last"
-                    >
-                      ✕
-                    </Button>
-                  </div>
-
-                  <Input
-                    type="text"
-                    data-testid={`pick-tier-${e.teamNumber}`}
-                    value={e.tier ?? ''}
-                    onChange={(ev) => updateField(e.teamNumber, 'tier', ev.target.value)}
-                    placeholder="Tier"
-                    aria-label={`Tier for team ${e.teamNumber}`}
-                    className="col-span-2 h-11 w-full sm:w-20"
-                  />
-                  <Input
-                    type="text"
-                    data-testid={`pick-note-${e.teamNumber}`}
-                    value={e.note ?? ''}
-                    onChange={(ev) => updateField(e.teamNumber, 'note', ev.target.value)}
-                    placeholder="Note"
-                    aria-label={`Note for team ${e.teamNumber}`}
-                    className="col-span-2 h-11 w-full min-w-0 sm:flex-1"
-                  />
-
-                  {/* Coaching flags: structured pick-tier pill + DNP toggle. */}
-                  <div className="col-span-2 flex shrink-0 items-center gap-1 sm:col-span-1">
-                    <button
-                      type="button"
-                      data-testid={`pick-tier-type-${e.teamNumber}`}
-                      onClick={() => cycleTier(e.teamNumber)}
-                      aria-label={`Pick tier for team ${e.teamNumber}`}
-                      className={cn(
-                        'inline-flex h-11 min-w-[44px] items-center justify-center rounded-md border px-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                        (e.tierType ?? null) === 'first'
-                          ? 'border-brand bg-brand/20 text-brand'
-                          : (e.tierType ?? null) === 'second'
-                            ? 'border-amber-500 bg-amber-500/20 text-amber-300'
-                            : 'border-border text-muted-foreground',
-                      )}
-                    >
-                      {(e.tierType ?? null) === 'first'
-                        ? '1st'
-                        : (e.tierType ?? null) === 'second'
-                          ? '2nd'
-                          : '—'}
-                    </button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      data-testid={`pick-dnp-${e.teamNumber}`}
-                      aria-pressed={e.dnp ?? false}
-                      aria-label={`DNP for team ${e.teamNumber}`}
-                      onClick={() => toggleDnp(e.teamNumber)}
-                      className={cn(
-                        'h-11 w-11',
-                        (e.dnp ?? false) && 'border-destructive bg-destructive/20 text-destructive',
-                      )}
-                    >
-                      ✋
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onDragEnd}
+            >
+              <SortableContext
+                items={picks.map((e) => e.teamNumber)}
+                strategy={verticalListSortingStrategy}
+              >
+                <ul className="space-y-2">
+                  {picks.map((e, i) => (
+                    <SortablePickRow
+                      key={e.teamNumber}
+                      entry={e}
+                      index={i}
+                      total={picks.length}
+                      onMove={move}
+                      onRemove={removeTeam}
+                      onUpdateField={updateField}
+                      onCycleTier={cycleTier}
+                    />
+                  ))}
+                </ul>
+              </SortableContext>
+            </DndContext>
           )}
         </CardContent>
       </Card>
@@ -607,6 +702,8 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
         aggByTeam={aggByTeam}
         inListTeams={inListTeams}
         onAdd={addTeamNumber}
+        dnpTeams={dnpTeams}
+        onToggleDnp={toggleDnp}
       />
 
       <PicklistSeedDialog

@@ -55,6 +55,42 @@ function useIsPortrait(): boolean {
   return portrait;
 }
 
+const RATING_LEVELS: (0 | 1 | 2 | 3)[] = [0, 1, 2, 3];
+const RATING_LABEL: Record<0 | 1 | 2 | 3, string> = { 0: '—', 1: 'Low', 2: 'Mid', 3: 'High' };
+
+/**
+ * One 0–3 subjective rating row (super-scout ratings): a label and four big
+ * touch buttons. 0 means "not rated". Active button uses the brand tone.
+ */
+function RatingRow(props: {
+  label: string;
+  value: 0 | 1 | 2 | 3;
+  onChange: (v: 0 | 1 | 2 | 3) => void;
+  testid: string;
+}): JSX.Element {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium text-muted-foreground">{props.label}</span>
+      <div data-testid={props.testid} className="grid grid-cols-4 gap-2">
+        {RATING_LEVELS.map((lvl) => (
+          <Button
+            key={lvl}
+            size="big"
+            variant={props.value === lvl ? 'default' : 'outline'}
+            className="flex-col gap-0 px-2 leading-tight landscape:px-4"
+            aria-pressed={props.value === lvl}
+            data-testid={`${props.testid}-${lvl}`}
+            onClick={() => props.onChange(lvl)}
+          >
+            <span className="text-lg font-semibold tabular-nums">{lvl}</span>
+            <span className="text-[10px] font-normal opacity-80">{RATING_LABEL[lvl]}</span>
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ReviewScreen(props: {
   session: ReturnType<typeof useCaptureSession>;
   onSaved: (id: string) => void;
@@ -322,6 +358,35 @@ export function ReviewScreen(props: {
                     className={inputClass}
                   />
                 </label>
+              </div>
+            </div>
+            {/* Subjective super-scout ratings (0 = not rated). Advisory only — they
+                never feed the scored fuel/climb points, just the dashboard's
+                qualitative read of a robot. */}
+            <div className="rounded-2xl border border-border bg-card p-3 landscape:p-4">
+              <p className="mb-2 flex items-center gap-2 text-base font-semibold landscape:mb-3">
+                <Shield className="size-5 text-brand" />
+                Ratings
+              </p>
+              <div className="grid grid-cols-1 gap-3 landscape:grid-cols-3 landscape:gap-4">
+                <RatingRow
+                  label="Defense quality"
+                  value={s.defenseRating}
+                  onChange={s.setDefenseRating}
+                  testid="review-defense-rating"
+                />
+                <RatingRow
+                  label="Driver skill"
+                  value={s.driverSkill}
+                  onChange={s.setDriverSkill}
+                  testid="review-driver-skill"
+                />
+                <RatingRow
+                  label="Agility"
+                  value={s.agility}
+                  onChange={s.setAgility}
+                  testid="review-agility"
+                />
               </div>
             </div>
           </section>

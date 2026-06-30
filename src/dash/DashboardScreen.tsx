@@ -13,6 +13,7 @@ import {
   UserCheck,
   Grid3x3,
   Users,
+  Gavel,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { IconTabs } from '@/components/ui/IconTabs';
@@ -27,18 +28,34 @@ import PicklistView from '@/dash/PicklistView';
 import ScoutersTab from '@/dash/ScoutersTab';
 import SetupTab from '@/dash/SetupTab';
 import AllianceSimulatorView from '@/dash/AllianceSimulatorView';
+import DraftBoardView from '@/dash/DraftBoardView';
 
-type Tab = 'next' | 'team' | 'scouters' | 'match' | 'ranking' | 'picklist' | 'setup' | 'alliance';
+type Tab =
+  | 'next'
+  | 'team'
+  | 'scouters'
+  | 'match'
+  | 'ranking'
+  | 'picklist'
+  | 'draft'
+  | 'setup'
+  | 'alliance';
 
-const TABS: { key: Tab; label: string; icon: LucideIcon; needsEvent: boolean }[] = [
+// `hidden` keeps a tab fully wired (route + render branch + ?tab= deep link)
+// while removing its button from the tab bar. To bring a tab back, just delete
+// its `hidden: true`.
+const TABS: { key: Tab; label: string; icon: LucideIcon; needsEvent: boolean; hidden?: boolean }[] = [
   { key: 'next', label: 'Next Match', icon: Swords, needsEvent: true },
   { key: 'team', label: 'Team', icon: UserSearch, needsEvent: true },
   { key: 'scouters', label: 'Scouters', icon: UserCheck, needsEvent: false },
   { key: 'match', label: 'Match', icon: Grid3x3, needsEvent: true },
   { key: 'ranking', label: 'Ranking', icon: ListOrdered, needsEvent: true },
   { key: 'picklist', label: 'Picklist', icon: ClipboardList, needsEvent: true },
+  { key: 'draft', label: 'Draft', icon: Gavel, needsEvent: true },
   { key: 'setup', label: 'Setup', icon: Settings, needsEvent: false },
-  { key: 'alliance', label: 'Alliance', icon: Users, needsEvent: true },
+  // Hidden for now — no clear use alongside the Draft board. Re-enable by
+  // removing `hidden: true`.
+  { key: 'alliance', label: 'Alliance', icon: Users, needsEvent: true, hidden: true },
 ];
 
 /** Legacy ?tab= values that now fold into a current tab. */
@@ -103,6 +120,7 @@ export default function DashboardScreen(): JSX.Element {
         value={tab}
         onChange={setTab}
         tabs={[...TABS]
+          .filter((t) => !t.hidden)
           // Setup is pinned to the far right no matter what other tabs exist
           // (stable sort: every non-setup tab keeps its order, setup goes last).
           .sort((a, b) => Number(a.key === 'setup') - Number(b.key === 'setup'))
@@ -147,6 +165,7 @@ export default function DashboardScreen(): JSX.Element {
               <RankingView eventKey={eventKey} onSelectTeam={openTeam} />
             )}
             {tab === 'picklist' && <PicklistView eventKey={eventKey} />}
+            {tab === 'draft' && <DraftBoardView eventKey={eventKey} onSelectTeam={openTeam} />}
             {tab === 'alliance' && <AllianceSimulatorView eventKey={eventKey} />}
           </section>
         ))}

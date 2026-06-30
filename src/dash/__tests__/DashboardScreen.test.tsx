@@ -118,7 +118,7 @@ describe('DashboardScreen', () => {
     expect(screen.getByTestId('scouters-tab')).toBeInTheDocument();
   });
 
-  it('always renders the Setup tab LAST in the tab bar, after Alliance', () => {
+  it('always renders the Setup tab LAST in the tab bar', () => {
     render(
       <MemoryRouter>
         <DashboardScreen />
@@ -126,13 +126,20 @@ describe('DashboardScreen', () => {
     );
     const tabs = screen.getAllByRole('tab');
     const labels = tabs.map((t) => t.textContent?.trim());
-    // Setup is pinned to the far right even though 'alliance' is declared after
-    // it in TABS (stable sort moves only setup to the end).
+    // Setup is pinned to the far right (stable sort moves only setup to the end).
     expect(labels[labels.length - 1]).toBe('Setup');
-    const allianceIdx = labels.indexOf('Alliance');
-    const setupIdx = labels.indexOf('Setup');
-    expect(allianceIdx).toBeGreaterThanOrEqual(0);
-    expect(allianceIdx).toBeLessThan(setupIdx);
+  });
+
+  it('hides the Alliance tab button but shows Draft', () => {
+    render(
+      <MemoryRouter>
+        <DashboardScreen />
+      </MemoryRouter>,
+    );
+    const labels = screen.getAllByRole('tab').map((t) => t.textContent?.trim());
+    // Alliance is currently hidden (TABS entry carries `hidden: true`).
+    expect(labels).not.toContain('Alliance');
+    expect(labels).toContain('Draft');
   });
 
   it('opens the Team tab with the team preselected when a ranking row is picked', () => {

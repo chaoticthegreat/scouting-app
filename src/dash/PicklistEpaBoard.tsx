@@ -11,7 +11,7 @@
 // motion (no animation). Dark theme, shadcn Card primitives, tabular-nums.
 
 import { useMemo } from 'react';
-import { Plus, Check } from 'lucide-react';
+import { Plus, Check, Ban } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import type { TeamRow, EventEpa } from '@/dash/useEventData';
@@ -34,6 +34,14 @@ export interface PicklistEpaBoardProps {
   inListTeams: Set<number>;
   /** Add a team to the picklist (reuses PicklistView's dedupe path). */
   onAdd: (teamNumber: number) => void;
+  /**
+   * Team numbers flagged "do not pick". DNP lives HERE (browsing every team),
+   * not on the curated picklist — you wouldn't list a team you won't pick.
+   * Optional so the board still renders without DNP wiring.
+   */
+  dnpTeams?: Set<number>;
+  /** Toggle a team's do-not-pick flag. When absent, the DNP control is hidden. */
+  onToggleDnp?: (teamNumber: number) => void;
 }
 
 /** A fully-resolved board row: identity + resolved EPA + its source label. */
@@ -51,7 +59,7 @@ function fmtEpa(n: number): string {
 }
 
 export default function PicklistEpaBoard(props: PicklistEpaBoardProps): JSX.Element {
-  const { teams, epa, aggByTeam, inListTeams, onAdd } = props;
+  const { teams, epa, aggByTeam, inListTeams, onAdd, dnpTeams, onToggleDnp } = props;
 
   const epaByTeam = epa?.epaByTeam;
   const sourceByTeam = epa?.sourceByTeam;
@@ -154,6 +162,29 @@ export default function PicklistEpaBoard(props: PicklistEpaBoardProps): JSX.Elem
                     ? `${Math.max(2, Math.min(100, (r.epa / maxEpa) * 100))}%`
                     : '8%';
               const added = inListTeams.has(r.teamNumber);
+              const isDnp = dnpTeams?.has(r.teamNumber) ?? false;
+              const dnpBtn = onToggleDnp ? (
+                <button
+                  type="button"
+                  data-testid={`epa-board-dnp-${r.teamNumber}`}
+                  aria-pressed={isDnp}
+                  aria-label={
+                    isDnp
+                      ? `Allow picking team ${r.teamNumber}`
+                      : `Mark team ${r.teamNumber} do not pick`
+                  }
+                  title={isDnp ? 'Do not pick — tap to clear' : 'Mark do not pick'}
+                  onClick={() => onToggleDnp(r.teamNumber)}
+                  className={cn(
+                    'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                    isDnp
+                      ? 'border-destructive bg-destructive/20 text-destructive'
+                      : 'border-border text-muted-foreground hover:border-destructive hover:text-destructive',
+                  )}
+                >
+                  <Ban className="h-4 w-4" aria-hidden="true" />
+                </button>
+              ) : null;
               return (
                 <li
                   key={r.teamNumber}
@@ -210,25 +241,35 @@ export default function PicklistEpaBoard(props: PicklistEpaBoardProps): JSX.Elem
                       </>
                     )}
                   </span>
-                  {added ? (
-                    <span
-                      data-testid={`epa-board-added-${r.teamNumber}`}
-                      aria-label={`Team ${r.teamNumber} already in picklist`}
-                      className="relative z-10 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-success"
-                    >
-                      <Check className="h-4 w-4" aria-hidden="true" />
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      data-testid={`epa-board-add-${r.teamNumber}`}
-                      onClick={() => onAdd(r.teamNumber)}
-                      aria-label={`Add team ${r.teamNumber} to picklist`}
-                      className="relative z-10 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground hover:border-brand hover:text-brand focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    >
-                      <Plus className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  )}
+                  {/* Right-side controls: when on the picklist, just the ✓. When
+                      flagged DNP, only the active DNP toggle. Otherwise an Add
+                      button beside the DNP toggle (mutually exclusive states). */}
+                  <span className="relative z-10 flex shrink-0 items-center gap-1">
+                    {added ? (
+                      <span
+                        data-testid={`epa-board-added-${r.teamNumber}`}
+                        aria-label={`Team ${r.teamNumber} already in picklist`}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-success"
+                      >
+                        <Check className="h-4 w-4" aria-hidden="true" />
+                      </span>
+                    ) : isDnp ? (
+                      dnpBtn
+                    ) : (
+                      <>
+                        {dnpBtn}
+                        <button
+                          type="button"
+                          data-testid={`epa-board-add-${r.teamNumber}`}
+                          onClick={() => onAdd(r.teamNumber)}
+                          aria-label={`Add team ${r.teamNumber} to picklist`}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:border-brand hover:text-brand focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                          <Plus className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      </>
+                    )}
+                  </span>
                 </li>
               );
             })}

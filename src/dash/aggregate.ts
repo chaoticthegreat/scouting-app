@@ -49,6 +49,12 @@ export interface TeamAgg {
   avgDefenseRating: number;
   noShowRate: number;
   diedRate: number;
+  /** fraction of scouted matches the robot tipped over (a softer incident than
+   *  no-show/died). Surfaced in the reliability breakdown; does NOT change the
+   *  `reliability` scalar (which feeds matchup guidance) to keep that stable. */
+  tippedRate: number;
+  /** count of scouted matches with ANY incident (no-show OR died OR tipped). */
+  incidentMatches: number;
   /** clamp01(1 - (noShowRate + diedRate)) */
   reliability: number;
   /** per-match expected from OUR scouted data: meanFuelPoints + meanClimbPoints (RAW). */
@@ -156,8 +162,12 @@ function clamp01(x: number): number {
  * the auto-climb bonus. A level-1 auto climb (auto_climb_level1) scores the auto
  * bonus regardless of the teleop climb outcome — it was previously dropped, so
  * auto climbs went uncounted in scoutingExpectedPoints.
+ *
+ * Exported so the TBA-validation module (`validateVsTba.ts`) reuses the SAME
+ * per-match climb math when summing a scouted alliance's offensive points —
+ * never re-implementing the frozen `SCORING.CLIMB` magnitudes.
  */
-function climbPointsForMatch(r: MsrRow): number {
+export function climbPointsForMatch(r: MsrRow): number {
   const climb = SCORING.CLIMB as Record<number, { auto: number; teleop: number }>;
   let pts = 0;
   if (r.climb_success) {
@@ -191,6 +201,8 @@ export function aggregateTeam(teamNumber: number, reports: MsrRow[]): TeamAgg {
   let sumDefense = 0;
   let noShowCount = 0;
   let diedCount = 0;
+  let tippedCount = 0;
+  let incidentCount = 0;
 
   // Distribution: per-match value arrays collected during the single loop.
   const fuelPts: number[] = [];
@@ -223,6 +235,8 @@ export function aggregateTeam(teamNumber: number, reports: MsrRow[]): TeamAgg {
     defense.push(r.defense_rating);
     if (r.no_show) noShowCount += 1;
     if (r.died) diedCount += 1;
+    if (r.tipped) tippedCount += 1;
+    if (r.no_show || r.died || r.tipped) incidentCount += 1;
 
     // Metric A: pool this report's defended/undefended fuel ball-time.
     if (Array.isArray(r.fuel_bursts) && r.fuel_bursts.length > 0) {
@@ -277,6 +291,8 @@ export function aggregateTeam(teamNumber: number, reports: MsrRow[]): TeamAgg {
     avgDefenseRating,
     noShowRate,
     diedRate,
+    tippedRate: tippedCount / n,
+    incidentMatches: incidentCount,
     reliability: clamp01(1 - (noShowRate + diedRate)),
     scoutingExpectedPoints: meanFuelPoints + meanClimbPoints,
     fuelSuppressionWhileDefended,
@@ -324,6 +340,8 @@ export function emptyTeamAgg(teamNumber: number): TeamAgg {
     avgDefenseRating: 0,
     noShowRate: 0,
     diedRate: 0,
+    tippedRate: 0,
+    incidentMatches: 0,
     reliability: 0,
     scoutingExpectedPoints: 0,
     fuelSuppressionWhileDefended: null,

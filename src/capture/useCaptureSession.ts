@@ -34,6 +34,8 @@ interface DeferredState {
   intakeSources: string[];
   maxFuelCapacityObserved: number;
   defenseRating: 0 | 1 | 2 | 3;
+  driverSkill: 0 | 1 | 2 | 3;
+  agility: 0 | 1 | 2 | 3;
   defenseDurationMs: number;
   defendedDurationMs: number;
   defenseIntervals: TimeInterval[];
@@ -61,6 +63,8 @@ const initialDeferred: DeferredState = {
   intakeSources: [],
   maxFuelCapacityObserved: 0,
   defenseRating: 0,
+  driverSkill: 0,
+  agility: 0,
   defenseDurationMs: 0,
   defendedDurationMs: 0,
   defenseIntervals: [],
@@ -182,6 +186,8 @@ export function useCaptureSession(target: CaptureTarget) {
         intakeSources: r.intakeSources ?? [],
         maxFuelCapacityObserved: r.maxFuelCapacityObserved,
         defenseRating: r.defenseRating,
+        driverSkill: r.driverSkill ?? 0,
+        agility: r.agility ?? 0,
         defenseDurationMs: r.defenseDurationMs,
         defendedDurationMs: r.defendedDurationMs,
         defenseIntervals: r.defenseIntervals ?? [],
@@ -644,6 +650,8 @@ export function useCaptureSession(target: CaptureTarget) {
       intakeSources: deferred.intakeSources,
       maxFuelCapacityObserved: deferred.maxFuelCapacityObserved,
       defenseRating: deferred.defenseRating,
+      driverSkill: deferred.driverSkill,
+      agility: deferred.agility,
       defenseDurationMs: deferred.defenseDurationMs,
       defendedDurationMs: deferred.defendedDurationMs,
       defenseIntervals: deferred.defenseIntervals,
@@ -720,6 +728,10 @@ export function useCaptureSession(target: CaptureTarget) {
     setMaxFuelCapacityObserved: (v: number) => updateDeferred('maxFuelCapacityObserved', v),
     defenseRating: deferred.defenseRating,
     setDefenseRating: (v: 0 | 1 | 2 | 3) => updateDeferred('defenseRating', v),
+    driverSkill: deferred.driverSkill,
+    setDriverSkill: (v: 0 | 1 | 2 | 3) => updateDeferred('driverSkill', v),
+    agility: deferred.agility,
+    setAgility: (v: 0 | 1 | 2 | 3) => updateDeferred('agility', v),
     defenseDurationMs: deferred.defenseDurationMs,
     setDefenseDurationMs: (v: number) => updateDeferred('defenseDurationMs', v),
     defendedDurationMs: deferred.defendedDurationMs,

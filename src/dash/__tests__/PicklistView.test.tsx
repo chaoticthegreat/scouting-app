@@ -211,34 +211,29 @@ describe('PicklistView', () => {
     expect(getByTestId('pick-row-1678')).toBeTruthy();
   });
 
-  it('saves the current ordered entries and shows a saved indicator', async () => {
+  it('autosaves the current ordered entries and shows a saved indicator', async () => {
     const { getByTestId } = await renderLoaded();
-    // reorder first so we can assert the saved order
+    // reorder — autosave persists it (no Save button)
     fireEvent.click(getByTestId('pick-up-1678'));
-    fireEvent.click(getByTestId('pick-save'));
 
-    await waitFor(() => expect(savePicklistMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(savePicklistMock).toHaveBeenCalledTimes(1), { timeout: 3000 });
     const [eventKey, entries] = savePicklistMock.mock.calls[0] as [string, PicklistEntry[]];
     expect(eventKey).toBe('2026casnv');
     expect(entries.map((e) => e.teamNumber)).toEqual([1678, 254]);
 
-    await waitFor(() => expect(getByTestId('pick-saved')).toBeTruthy());
+    await waitFor(() => expect(getByTestId("pick-saved")).toBeTruthy(), { timeout: 3000 });
   });
 
-  it('edits tier and note inputs into state and saves them', async () => {
+  it('edits the note input and autosaves it', async () => {
     const { getByTestId } = await renderLoaded();
     const row = getByTestId('pick-row-254');
-    const tier = within(row).getByTestId('pick-tier-254') as HTMLInputElement;
     const note = within(row).getByTestId('pick-note-254') as HTMLInputElement;
 
-    fireEvent.change(tier, { target: { value: 'S' } });
     fireEvent.change(note, { target: { value: 'fast cycle' } });
-    fireEvent.click(getByTestId('pick-save'));
 
-    await waitFor(() => expect(savePicklistMock).toHaveBeenCalledTimes(1));
-    const entries = (savePicklistMock.mock.calls[0] as [string, PicklistEntry[]])[1];
+    await waitFor(() => expect(savePicklistMock).toHaveBeenCalled(), { timeout: 3000 });
+    const entries = savePicklistMock.mock.calls.at(-1)![1] as PicklistEntry[];
     const e254 = entries.find((e) => e.teamNumber === 254)!;
-    expect(e254.tier).toBe('S');
     expect(e254.note).toBe('fast cycle');
   });
 
@@ -350,19 +345,16 @@ describe('PicklistView', () => {
     expect((getByTestId('pick-seed-confirm') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('toggleDnp adds/removes the DNP badge and clears the saved indicator', async () => {
+  it('marks a team do-not-pick from the EPA board and autosaves it (not as a pick row)', async () => {
     const { getByTestId, queryByTestId } = await renderLoaded();
-    // Save once so the saved indicator is showing, then a DNP edit must clear it.
-    fireEvent.click(getByTestId('pick-save'));
-    await waitFor(() => expect(getByTestId('pick-saved')).toBeTruthy());
 
-    fireEvent.click(getByTestId('pick-dnp-254'));
-    expect(getByTestId('pick-dnp-badge-254')).toBeTruthy();
-    expect(queryByTestId('pick-saved')).toBeNull();
-
-    // Toggling off removes the badge.
-    fireEvent.click(getByTestId('pick-dnp-254'));
-    expect(queryByTestId('pick-dnp-badge-254')).toBeNull();
+    // 9999 isn't on the picklist, so the board shows its DNP toggle.
+    fireEvent.click(getByTestId('epa-board-dnp-9999'));
+    await waitFor(() => expect(savePicklistMock).toHaveBeenCalled(), { timeout: 3000 });
+    const entries = savePicklistMock.mock.calls.at(-1)![1] as PicklistEntry[];
+    expect(entries.find((e) => e.teamNumber === 9999)?.dnp).toBe(true);
+    // A DNP team never appears as an ordered pick row.
+    expect(queryByTestId('pick-row-9999')).toBeNull();
   });
 
   it('cycleTier cycles — → 1st → 2nd → —', async () => {
@@ -377,16 +369,13 @@ describe('PicklistView', () => {
     expect(pill.textContent).toBe('—');
   });
 
-  it('persists dnp/tierType through Save', async () => {
+  it('persists tierType through autosave', async () => {
     const { getByTestId } = await renderLoaded();
-    fireEvent.click(getByTestId('pick-dnp-254'));
     fireEvent.click(getByTestId('pick-tier-type-254')); // → first
-    fireEvent.click(getByTestId('pick-save'));
 
-    await waitFor(() => expect(savePicklistMock).toHaveBeenCalledTimes(1));
-    const entries = (savePicklistMock.mock.calls[0] as [string, PicklistEntry[]])[1];
+    await waitFor(() => expect(savePicklistMock).toHaveBeenCalled(), { timeout: 3000 });
+    const entries = savePicklistMock.mock.calls.at(-1)![1] as PicklistEntry[];
     const e254 = entries.find((e) => e.teamNumber === 254)!;
-    expect(e254.dnp).toBe(true);
     expect(e254.tierType).toBe('first');
   });
 

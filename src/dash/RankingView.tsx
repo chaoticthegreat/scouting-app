@@ -120,6 +120,27 @@ function pct(rate: number): string {
   return `${Math.round(rate * 100)}%`;
 }
 
+/**
+ * Rank tier by leaderboard position — the same cut as the picklist EPA board so
+ * Ranking and Picklist read as one system: top 3 (alliance captains' caliber)
+ * in brand cyan, 4–8 in energy amber, the rest muted.
+ */
+function rankTier(rank: number): 'top' | 'mid' | 'low' {
+  return rank <= 3 ? 'top' : rank <= 8 ? 'mid' : 'low';
+}
+/** Strength-bar tint per tier (quiet, behind the row). */
+const TIER_BAR: Record<'top' | 'mid' | 'low', string> = {
+  top: 'bg-brand/20',
+  mid: 'bg-energy/15',
+  low: 'bg-muted-foreground/10',
+};
+/** Rank-number text tint per tier. */
+const TIER_RANK_TEXT: Record<'top' | 'mid' | 'low', string> = {
+  top: 'text-brand',
+  mid: 'text-energy',
+  low: 'text-muted-foreground',
+};
+
 /** Build the lookup of teamNumber → TBA rank from the (possibly absent) payload. */
 function buildTbaRankMap(data: unknown): Map<number, number> {
   const map = new Map<number, number>();
@@ -404,6 +425,14 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
     return copy;
   }, [rows, sortKey, sortDir]);
 
+  // Field-max EPA for the per-row strength bars (positive only — the signature
+  // "field strength" motif shared with the picklist EPA board).
+  const maxEpa = useMemo(() => {
+    let m = 0;
+    for (const r of rows) if (r.epa != null && r.epa > m) m = r.epa;
+    return m;
+  }, [rows]);
+
   function onSort(key: SortKey): void {
     if (key === sortKey) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -479,7 +508,15 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
       <Card className="bg-card">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
-            <CardTitle>Team Rankings</CardTitle>
+            <CardTitle className="flex items-baseline gap-2">
+              Team Rankings
+              <span
+                data-testid="ranking-count"
+                className="text-xs font-normal tabular-nums text-muted-foreground"
+              >
+                {sortedRows.length} ranked
+              </span>
+            </CardTitle>
             <div ref={columnsRef} className="relative">
               <Button
                 type="button"
@@ -554,7 +591,6 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
                       scope="col"
                       className={cn(
                         'px-2 py-1 text-left font-medium text-muted-foreground',
-                        col.key === 'teamNumber' && 'sticky left-0 z-10 bg-card',
                         (col.key === 'epa' ||
                           col.key === 'tbaRank' ||
                           col.key === 'fuelSuppression' ||
@@ -579,17 +615,38 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
                 </tr>
               </thead>
               <tbody>
-                {sortedRows.map((r) => {
+                {sortedRows.map((r, idx) => {
                   const t = r.agg.teamNumber;
                   const checked = selected.includes(t);
                   const atCap = !checked && selected.length >= MAX_COMPARE;
+                  const rank = idx + 1;
+                  const tier = rankTier(rank);
+                  // Strength bar width = this team's EPA vs the field max (the
+                  // shared field-strength motif). Absolutely positioned against the
+                  // `relative` row so it spans the whole row behind the cells.
+                  const barWidth =
+                    r.epa == null || maxEpa <= 0
+                      ? '0%'
+                      : `${Math.max(2, Math.min(100, (r.epa / maxEpa) * 100))}%`;
                   return (
                     <tr
                       key={t}
                       data-testid={`ranking-row-${t}`}
-                      className="border-b border-border/50 hover:bg-accent/30"
+                      className="relative isolate border-b border-border/50 hover:bg-accent/20"
                     >
-                      <td className="px-2 py-1">
+                      <td className="px-2 py-2">
+                        {/* SIGNATURE: quiet field-strength bar behind the row. The
+                            row isolates a stacking context so this -z layer sits
+                            behind the cell text but above the hover tint. */}
+                        <div
+                          aria-hidden="true"
+                          data-testid={`ranking-bar-${t}`}
+                          style={{ width: barWidth }}
+                          className={cn(
+                            'pointer-events-none absolute inset-y-0 left-0 -z-10 motion-safe:transition-[width]',
+                            TIER_BAR[tier],
+                          )}
+                        />
                         <input
                           type="checkbox"
                           data-testid={`cmp-${t}`}
@@ -597,23 +654,33 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
                           checked={checked}
                           disabled={atCap}
                           onChange={() => toggleSelect(t)}
-                          className="h-5 w-5 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-40"
+                          className="relative z-10 h-5 w-5 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                         />
                       </td>
-                      <td className="sticky left-0 z-10 bg-card px-2 py-1 font-medium">
-                        {onSelectTeam ? (
-                          <button
-                            type="button"
-                            data-testid={`ranking-team-${t}`}
-                            onClick={() => onSelectTeam(t)}
-                            aria-label={`Open team ${t}`}
-                            className="inline-flex min-h-[44px] items-center rounded px-2 tabular-nums text-brand hover:text-brand/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      <td className="relative z-10 px-2 py-2 font-medium">
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              'w-7 shrink-0 text-right text-xs font-semibold tabular-nums',
+                              TIER_RANK_TEXT[tier],
+                            )}
                           >
-                            {t}
-                          </button>
-                        ) : (
-                          <span className="tabular-nums text-brand">{t}</span>
-                        )}
+                            #{rank}
+                          </span>
+                          {onSelectTeam ? (
+                            <button
+                              type="button"
+                              data-testid={`ranking-team-${t}`}
+                              onClick={() => onSelectTeam(t)}
+                              aria-label={`Open team ${t}`}
+                              className="inline-flex min-h-[44px] items-center rounded tabular-nums text-base font-semibold text-brand hover:text-brand/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            >
+                              {t}
+                            </button>
+                          ) : (
+                            <span className="tabular-nums text-base font-semibold text-brand">{t}</span>
+                          )}
+                        </span>
                       </td>
                       {isVisible('matchesScouted') && (
                         <td className="px-2 py-2 tabular-nums">{r.agg.matchesScouted}</td>

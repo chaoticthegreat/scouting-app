@@ -180,6 +180,42 @@ describe('PicklistEpaBoard', () => {
     expect(getByTestId('epa-board-bar-9999').style.width).toBe('0%');
   });
 
+  it('renders a DNP toggle that calls onToggleDnp, and hides it for picked teams', () => {
+    const onToggleDnp = vi.fn();
+    const { getByTestId, queryByTestId } = render(
+      <PicklistEpaBoard
+        teams={TEAMS}
+        epa={statboticsEpa()}
+        aggByTeam={new Map<number, TeamAgg>()}
+        inListTeams={new Set([254])}
+        dnpTeams={new Set([1678])}
+        onToggleDnp={onToggleDnp}
+        onAdd={onAdd}
+      />,
+    );
+    // 254 is a pick → no DNP toggle (can't DNP a team on your picklist).
+    expect(queryByTestId('epa-board-dnp-254')).toBeNull();
+    // 1678 is flagged DNP → its toggle is pressed and clears on click.
+    const dnp1678 = getByTestId('epa-board-dnp-1678');
+    expect(dnp1678.getAttribute('aria-pressed')).toBe('true');
+    // 9999 is neither → an unpressed DNP toggle that flags on click.
+    fireEvent.click(getByTestId('epa-board-dnp-9999'));
+    expect(onToggleDnp).toHaveBeenCalledWith(9999);
+  });
+
+  it('omits the DNP control entirely when onToggleDnp is not provided', () => {
+    const { queryByTestId } = render(
+      <PicklistEpaBoard
+        teams={TEAMS}
+        epa={statboticsEpa()}
+        aggByTeam={new Map<number, TeamAgg>()}
+        inListTeams={new Set()}
+        onAdd={onAdd}
+      />,
+    );
+    expect(queryByTestId('epa-board-dnp-254')).toBeNull();
+  });
+
   it('degrades to an empty state when there are no teams', () => {
     const { getByTestId } = render(
       <PicklistEpaBoard

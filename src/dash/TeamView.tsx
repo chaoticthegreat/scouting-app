@@ -28,6 +28,9 @@ import {
   Ruler,
   Swords,
   Route,
+  Timer,
+  ShieldAlert,
+  MessageSquareText,
 } from 'lucide-react';
 import { FieldDiagram } from '@/components/FieldDiagram';
 import { MatchScorePanel } from '@/dash/MatchScorePanel';
@@ -37,6 +40,7 @@ import { cn } from '@/lib/utils';
 import { formatMatchKeyRaw, compareMatchKeys } from '@/lib/formatMatch';
 import { foulReasonLabel } from '@/scoring/fouls';
 import { aggregateEvent, TREND_WINDOW, type TeamAgg } from '@/dash/aggregate';
+import { computeTeamTempo } from '@/dash/tempo';
 import {
   useEventTeams,
   useEventReports,
@@ -97,6 +101,19 @@ function fmt(n: number, digits = 1): string {
 function pct(n: number): string {
   if (!Number.isFinite(n)) return '—';
   return `${(n * 100).toFixed(0)}%`;
+}
+
+/**
+ * Mean of a 0–3 rating across the team's RATED matches (0 / null excluded), as
+ * "2.3/3"; "—" when no match was rated. Pure over the team's reports — keeps the
+ * super-scout averages off `TeamAgg` (no new aggregate field / fixture churn).
+ */
+function ratedMeanText(matches: MsrRow[], sel: (m: MsrRow) => number | null | undefined): string {
+  const vals = matches
+    .map(sel)
+    .filter((v): v is number => typeof v === 'number' && v > 0);
+  if (vals.length === 0) return '—';
+  return `${(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)}/3`;
 }
 
 /** "30.0 ± 8.2" (mean ± std-dev); em-dash when the mean is not finite. */
@@ -718,6 +735,150 @@ function TeamTrends(props: { matches: MsrRow[]; showClimb: boolean }): JSX.Eleme
   );
 }
 
+/**
+ * Reliability-by-match strip (robot-reliability-trend feature): one square per
+ * scouted match in play order — green = clean, amber = tipped, red = died /
+ * no-show — so a lead reads a robot's incident history at a glance (e.g. "fine
+ * early, tipped twice late"). Pure over the team's already-fetched reports; the
+ * `tipped`/`died`/`no_show` flags are existing raw columns (no migration).
+ */
+function ReliabilityStrip(props: { matches: MsrRow[] }): JSX.Element | null {
+  const ordered = useMemo(
+    () => props.matches.slice().sort((a, b) => compareMatchKeys(a.match_key, b.match_key)),
+    [props.matches],
+  );
+  if (ordered.length === 0) return null;
+  return (
+    <div
+      data-testid="team-reliability-strip"
+      className="col-span-2 flex flex-col gap-1.5 sm:col-span-3"
+    >
+      <span className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-zinc-400">
+        <ShieldAlert className="size-3.5" /> Reliability by match
+      </span>
+      <div className="flex flex-wrap gap-1">
+        {ordered.map((m, i) => {
+          const incident = m.no_show ? 'no-show' : m.died ? 'died' : m.tipped ? 'tipped' : null;
+          const tone =
+            m.no_show || m.died ? 'bg-destructive' : m.tipped ? 'bg-warning' : 'bg-success/60';
+          return (
+            <span
+              key={`${m.match_key}-${i}`}
+              data-testid={`team-reliability-cell-${i}`}
+              title={`${formatMatchKeyRaw(m.match_key)} — ${incident ?? 'clean'}`}
+              className={cn('size-4 rounded-sm', tone)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** ms → "1.2s" (one decimal); em-dash when null/non-finite. */
+function secs(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) return '—';
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Tempo card (cycle-time feature): shooting cadence derived from the team's
+ * `fuel_bursts` timestamps — cycles per match, the reload/travel gap between
+ * bursts (the robot's cycle time), continuous-burst length, and the share of the
+ * match spent actively shooting. Renders nothing until at least one scouted match
+ * carries timestamped bursts (legacy/pre-0010 reports lack them).
+ */
+function TempoCard(props: { matches: MsrRow[] }): JSX.Element | null {
+  const tempo = useMemo(() => computeTeamTempo(props.matches), [props.matches]);
+  if (tempo.reportsWithBursts === 0) return null;
+  return (
+    <Card className="border-zinc-800 bg-zinc-950" data-testid="team-tempo">
+      <CardHeader className="space-y-0">
+        <CardTitle className="flex items-center gap-2 text-zinc-100">
+          <Timer className="size-5 text-brand" />
+          Tempo
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat
+          label="Cycle time"
+          value={secs(tempo.meanGapMs)}
+          testid="team-tempo-cycle"
+          hint="gap between shooting bursts"
+          tone="brand"
+        />
+        <Stat
+          label="Cycles / match"
+          value={fmt(tempo.meanBurstsPerMatch)}
+          testid="team-tempo-cycles"
+        />
+        <Stat
+          label="Burst length"
+          value={secs(tempo.meanBurstDurationMs)}
+          testid="team-tempo-burst"
+          hint="continuous shooting span"
+        />
+        <Stat
+          label="Active"
+          value={pct(tempo.activeFraction)}
+          testid="team-tempo-active"
+          hint={`of match · n=${tempo.reportsWithBursts}`}
+          tone="energy"
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Scout notes for a team, aggregated into one block (instead of buried per-match
+ * in the scouted-match rows). A quiet scouting log: each note anchored to its
+ * match + scouter, set off by a left brand rule so the column reads as a running
+ * record. Chronological by play order. Renders nothing when no match has a note.
+ */
+function TeamNotes(props: {
+  matches: MsrRow[];
+  scoutName: (id: string | null | undefined) => string;
+}): JSX.Element | null {
+  const noted = useMemo(
+    () =>
+      props.matches
+        .filter((m) => (m.notes ?? '').trim().length > 0)
+        .sort((a, b) => compareMatchKeys(a.match_key, b.match_key)),
+    [props.matches],
+  );
+  if (noted.length === 0) return null;
+  return (
+    <Card className="border-zinc-800 bg-zinc-950" data-testid="team-notes">
+      <CardHeader className="space-y-0">
+        <CardTitle className="flex items-center gap-2 text-zinc-100">
+          <MessageSquareText className="size-5 text-brand" />
+          Scout notes ({noted.length})
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ul className="flex flex-col gap-3">
+          {noted.map((m, i) => (
+            <li
+              key={`${m.match_key}-${i}`}
+              data-testid={`team-note-${i}`}
+              className="border-l-2 border-brand/40 pl-3"
+            >
+              <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-zinc-400">
+                <span className="font-semibold text-zinc-200">
+                  {formatMatchKeyRaw(m.match_key)}
+                </span>
+                <span>· {props.scoutName(m.scout_id)}</span>
+              </div>
+              <p className="mt-0.5 text-sm leading-relaxed text-zinc-300">{m.notes}</p>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
 function TeamDetail(props: {
   agg: TeamAgg;
   teamNumber: number;
@@ -888,6 +1049,21 @@ function TeamDetail(props: {
             hint={`range ${fmt(agg.minDefenseRating)} – ${fmt(agg.maxDefenseRating)}`}
             tone="brand"
           />
+          {/* Subjective super-scout ratings, averaged over RATED matches (0 = not
+              rated, excluded). Computed inline from the team's reports — no new
+              TeamAgg field. "—" until at least one match was rated. */}
+          <Stat
+            label="Driver skill"
+            value={ratedMeanText(matches, (m) => m.driver_skill)}
+            testid="team-driver-skill"
+            hint="0–3 · rated matches"
+          />
+          <Stat
+            label="Agility"
+            value={ratedMeanText(matches, (m) => m.agility)}
+            testid="team-agility"
+            hint="0–3 · rated matches"
+          />
           <Stat
             label="Defended fuel ↓"
             value={
@@ -935,7 +1111,7 @@ function TeamDetail(props: {
             label="Reliability"
             value={pct(agg.reliability)}
             testid="team-reliability"
-            hint={`no-show ${pct(agg.noShowRate)} · died ${pct(agg.diedRate)}`}
+            hint={`no-show ${pct(agg.noShowRate)} · died ${pct(agg.diedRate)} · tipped ${pct(agg.tippedRate)}`}
             tone={
               agg.reliability >= 0.85 ? 'success' : agg.reliability >= 0.6 ? 'warning' : 'destructive'
             }
@@ -945,8 +1121,13 @@ function TeamDetail(props: {
             value={fmt(agg.scoutingExpectedPoints)}
             testid="team-scouting-expected"
           />
+          {/* Per-match incident trend (green clean / amber tipped / red died). */}
+          <ReliabilityStrip matches={matches} />
         </CardContent>
       </Card>
+
+      {/* Shooting tempo / cycle-time — derived from fuel-burst timestamps. */}
+      <TempoCard matches={matches} />
 
       {/* Trends — per-match data-viz over this team's scouted matches. Hidden
           entirely when there isn't enough data to draw a meaningful trend
@@ -986,6 +1167,9 @@ function TeamDetail(props: {
           />
         </CardContent>
       </Card>
+
+      {/* All scout notes for this team, aggregated into one block. */}
+      <TeamNotes matches={matches} scoutName={scoutName} />
 
       {/* Scouted matches */}
       <Card className="border-zinc-800 bg-zinc-950">

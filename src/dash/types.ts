@@ -56,6 +56,10 @@ export interface MsrRow {
   auto_climb_level1: boolean;
 
   defense_rating: number;
+  // Subjective super-scout ratings (0–3; 0 = not rated). Optional: legacy rows /
+  // pre-0039 deployments omit the column. SELECT `*` brings it. Consumers null-guard.
+  driver_skill?: number | null;
+  agility?: number | null;
   pins: number;
 
   // Timestamped activity, used to reconstruct a per-match timeline. Optional:

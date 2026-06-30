@@ -22,6 +22,7 @@ import {
   ChevronDown,
   PanelLeftClose,
   PanelLeft,
+  Scale,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Sheet } from '@/components/ui/Sheet';
@@ -45,6 +46,12 @@ import { MatchScorePanel } from '@/dash/MatchScorePanel';
 import { MATCH_MS } from '@/dash/matchTimeline';
 import ConflictMarker from '@/components/ConflictMarker';
 import { useMultiScoutConflicts } from '@/dash/useMultiScoutConflicts';
+import {
+  validateMatchVsTba,
+  validationLabel,
+  type AllianceScoreCheck,
+  type TbaValidationSeverity,
+} from '@/dash/validateVsTba';
 import type { MsrRow, MultiScoutGroup } from '@/dash/types';
 
 export interface MatchViewProps {
@@ -414,6 +421,100 @@ function MatchResultsCard(props: { match: MatchRow }): JSX.Element {
             }
           />
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Tint classes for one alliance's TBA-validation row, by severity. */
+function validationTone(s: TbaValidationSeverity): string {
+  switch (s) {
+    case 'severe':
+      return 'border-destructive/40 bg-destructive/10 text-destructive';
+    case 'minor':
+      return 'border-warning/40 bg-warning/10 text-warning';
+    case 'match':
+      return 'border-success/40 bg-success/10 text-success';
+    default:
+      // incomplete / unscouted / unscored — neutral, informational.
+      return 'border-border bg-muted/40 text-muted-foreground';
+  }
+}
+
+/** One alliance's scouted-vs-official line. */
+function ValidationRow(props: { check: AllianceScoreCheck }): JSX.Element {
+  const { check } = props;
+  const colorLabel = check.allianceColor === 'red' ? 'Red' : 'Blue';
+  const deltaText =
+    check.delta == null ? null : `${check.delta > 0 ? '+' : ''}${Math.round(check.delta)}`;
+  const Icon = check.severity === 'match' ? CheckCircle2 : AlertTriangle;
+  const showIcon = check.severity === 'match' || check.severity === 'minor' || check.severity === 'severe';
+  return (
+    <div
+      data-testid={`match-validation-${check.allianceColor}`}
+      className={cn(
+        'flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-sm',
+        validationTone(check.severity),
+      )}
+    >
+      <span className="inline-flex items-center gap-1.5 font-semibold">
+        {showIcon ? <Icon className="size-4" /> : null}
+        <span className={check.allianceColor === 'red' ? 'text-red-400' : 'text-blue-400'}>
+          {colorLabel}
+        </span>
+        <span className="text-foreground">{validationLabel(check.severity)}</span>
+      </span>
+      <span className="inline-flex items-center gap-2 tabular-nums text-muted-foreground">
+        <span>
+          scouted <span className="text-foreground">{Math.round(check.scoutedOffensePoints)}</span>
+        </span>
+        <span>·</span>
+        <span>
+          official <span className="text-foreground">{check.officialScore ?? '—'}</span>
+        </span>
+        {deltaText != null ? (
+          <span data-testid={`match-validation-${check.allianceColor}-delta`}>({deltaText})</span>
+        ) : null}
+        {check.scoutedRobots < 3 ? <span>· {check.scoutedRobots}/3 bots</span> : null}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Scout-vs-official cross-check (validate-scout-data-vs-TBA). Shown only for a
+ * PLAYED match that has at least one scout report: sums each alliance's scouted
+ * offensive points (fuel + climb) and compares to the official TBA score,
+ * flagging gaps. Honest framing — official totals include points we never scout
+ * (mobility, fouls awarded), so the scouted sum runs a bit under by design; this
+ * catches gross errors (a missed/duplicated robot, a fat-fingered count), not
+ * exact reconciliation. Degrades to nothing when unplayed / unscouted.
+ */
+function ScoreValidationCard(props: { match: MatchRow; reports: MsrRow[] }): JSX.Element | null {
+  const { match, reports } = props;
+  const played = match.actual_red_score != null && match.actual_blue_score != null;
+  const validation = useMemo(
+    () => validateMatchVsTba(match.match_key, reports, match.actual_red_score, match.actual_blue_score),
+    [match.match_key, match.actual_red_score, match.actual_blue_score, reports],
+  );
+  // Nothing to say until the match is played AND someone scouted it.
+  if (!played) return null;
+  if (validation.red.scoutedRobots === 0 && validation.blue.scoutedRobots === 0) return null;
+
+  return (
+    <Card data-testid="match-validation" className="border-border bg-card">
+      <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+        <Scale className="size-5 text-brand" />
+        <CardTitle className="text-foreground">Scout data vs official</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <ValidationRow check={validation.red} />
+        <ValidationRow check={validation.blue} />
+        <p className="text-xs text-muted-foreground">
+          Scouted = our captured fuel + climb points. Official totals also include mobility and
+          fouls we don&apos;t scout, so a small gap is normal — large gaps flag a missed robot or a
+          mis-captured count.
+        </p>
       </CardContent>
     </Card>
   );
@@ -807,6 +908,12 @@ export default function MatchView(props: MatchViewProps): JSX.Element {
                       full-width on top — the alliance/score block from the Team
                       tab's last-match card. */}
                   {selectedMatch ? <MatchResultsCard match={selectedMatch} /> : null}
+                  {/* Scout-vs-official cross-check, directly under the real
+                      result so a lead reads "official 300 / we scouted 90 → off"
+                      in one glance. */}
+                  {selectedMatch ? (
+                    <ScoreValidationCard match={selectedMatch} reports={selectedReports} />
+                  ) : null}
                   {/* Video + activity timelines combined into one block. */}
                   <MatchVideoCard
                     matchKey={selected}

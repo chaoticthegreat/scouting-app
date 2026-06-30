@@ -41,6 +41,11 @@ export interface LocalMatchReport {
   intakeSources: string[];
   maxFuelCapacityObserved: number;
   defenseRating: 0 | 1 | 2 | 3;
+  // Subjective super-scout ratings (0 = not rated, 1–3 scale). Advisory only —
+  // never scored. Optional: reports captured before this field (pre-0039) lack
+  // it, so consumers default to 0.
+  driverSkill?: 0 | 1 | 2 | 3;
+  agility?: 0 | 1 | 2 | 3;
   // Exact durations in ms (no buckets). defenseDurationMs = time this robot played
   // defense on others; defendedDurationMs = time this robot was being defended.
   defenseDurationMs: number;

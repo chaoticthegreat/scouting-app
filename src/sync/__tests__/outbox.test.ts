@@ -79,7 +79,7 @@ const EXPECTED_PAYLOAD_KEYS = [
   'inactive_first_source', 'teleop_clock_unconfirmed', 'fuel_bursts', 'feeding_bursts', 'climb_level',
   'climb_attempted', 'climb_success', 'auto_start_position', 'auto_path',
   'auto_left_starting_line', 'auto_climb_level1', 'intake_sources',
-  'max_fuel_capacity_observed', 'defense_rating', 'defense_duration_ms',
+  'max_fuel_capacity_observed', 'defense_rating', 'driver_skill', 'agility', 'defense_duration_ms',
   'defended_duration_ms', 'defense_intervals', 'defended_intervals', 'pins', 'fouls_minor',
   'fouls_major', 'foul_reasons', 'no_show', 'died', 'tipped', 'dropped_fuel', 'fed_corral',
   'notes', 'row_revision', 'deleted',

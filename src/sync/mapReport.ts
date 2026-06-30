@@ -36,6 +36,10 @@ export function toUpsertPayload(r: LocalMatchReport): Record<string, unknown> {
     intake_sources: r.intakeSources,
     max_fuel_capacity_observed: r.maxFuelCapacityObserved,
     defense_rating: r.defenseRating,
+    // Subjective super-scout ratings (0–3; raw stored, never scored). Omitted-safe
+    // via the server's coalesce-to-0 for reports captured before migration 0039.
+    driver_skill: r.driverSkill ?? 0,
+    agility: r.agility ?? 0,
     defense_duration_ms: r.defenseDurationMs ?? 0,
     defended_duration_ms: r.defendedDurationMs ?? 0,
     defense_intervals: r.defenseIntervals ?? [],

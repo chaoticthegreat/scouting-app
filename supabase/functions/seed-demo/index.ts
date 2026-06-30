@@ -608,6 +608,10 @@ async function runSeed(srcKey: string, demoKey: string): Promise<Response> {
         intake_sources: intakeSources,
         max_fuel_capacity_observed: maxFuelObserved,
         defense_rating: defenseRating,
+        // Subjective super-scout ratings (0–3): scale with team strength `s`,
+        // jittered; 0 when the robot never showed.
+        driver_skill: noShow ? 0 : clampInt(1 + s * 2 + (rng() - 0.5), 0, 3),
+        agility: noShow ? 0 : clampInt(1 + s * 2 + (rng() - 0.5), 0, 3),
         pins,
         fouls_minor: rng() < 0.3 ? 1 : 0,
         fouls_major: rng() < 0.1 ? 1 : 0,

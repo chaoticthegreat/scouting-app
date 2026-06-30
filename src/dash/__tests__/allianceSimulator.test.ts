@@ -36,6 +36,8 @@ function agg(overrides: Partial<TeamAgg>): TeamAgg {
     avgDefenseRating: 0,
     noShowRate: 0,
     diedRate: 0,
+    tippedRate: 0,
+    incidentMatches: 0,
     reliability: 1,
     scoutingExpectedPoints: 0,
     fuelSuppressionWhileDefended: null,

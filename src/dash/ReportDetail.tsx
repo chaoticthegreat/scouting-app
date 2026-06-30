@@ -44,6 +44,11 @@ function fmt(n: number, digits = 1): string {
   return n.toFixed(digits);
 }
 
+/** A 0–3 subjective rating as "2/3"; "—" when not rated (0 / null / legacy). */
+function ratingText(v: number | null | undefined): string {
+  return v != null && v > 0 ? `${v}/3` : '—';
+}
+
 function pct(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return `${Math.round(n * 100)}%`;
@@ -180,11 +185,13 @@ export default function ReportDetail(props: ReportDetailProps): JSX.Element {
         </div>
       </section>
 
-      {/* Defense */}
+      {/* Defense & ratings */}
       <section className="flex flex-col gap-2">
-        <SectionHeading icon={<Shield />}>Defense</SectionHeading>
+        <SectionHeading icon={<Shield />}>Defense &amp; ratings</SectionHeading>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <StatTile label="Defense rating" value={r.defense_rating} />
+          <StatTile label="Defense rating" value={ratingText(r.defense_rating)} />
+          <StatTile label="Driver skill" value={ratingText(r.driver_skill)} />
+          <StatTile label="Agility" value={ratingText(r.agility)} />
           <StatTile label="Pins" value={r.pins} />
         </div>
       </section>

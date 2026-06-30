@@ -143,10 +143,16 @@ export default function PicklistEpaBoard(props: PicklistEpaBoardProps): JSX.Elem
               const rank = i + 1;
               // Tier-tinted strength bar: top 3 brand, next 5 energy, rest muted.
               const tier = rank <= 3 ? 'top' : rank <= 8 ? 'mid' : 'low';
+              // Width = epa / maxEpa across the field. When every value is <= 0
+              // (e.g. all-zero in-house estimates) maxEpa is 0 and a naive ratio
+              // would zero out EVERY bar — instead give each ranked team an equal
+              // minimal bar so the board still reads as ranked, not blank.
               const barWidth =
-                r.epa != null && maxEpa > 0
-                  ? `${Math.max(2, Math.min(100, (r.epa / maxEpa) * 100))}%`
-                  : '0%';
+                r.epa == null
+                  ? '0%'
+                  : maxEpa > 0
+                    ? `${Math.max(2, Math.min(100, (r.epa / maxEpa) * 100))}%`
+                    : '8%';
               const added = inListTeams.has(r.teamNumber);
               return (
                 <li

@@ -31,12 +31,44 @@ export interface PicklistViewProps {
 
 const TOUCH = 'min-h-[44px] min-w-[44px]';
 
+/** Result of validating a typed team number against the event team list. */
+export type AddTeamValidation =
+  | { ok: true; teamNumber: number }
+  | { ok: false; reason: string };
+
+/**
+ * Pure validation for the "add team" input (BUG-11). Rejects non-positive /
+ * non-integer values, teams already on the picklist, and — crucially — any team
+ * not present in the event's team list (`eventTeams`), which previously let a
+ * bogus number like 99999 onto the picklist with no name. When `eventTeams` is
+ * empty (team list still loading / unavailable) we DON'T gate on membership, so
+ * the picklist stays usable offline rather than rejecting everything.
+ */
+export function validateAddTeam(
+  raw: string,
+  existing: ReadonlySet<number>,
+  eventTeams: ReadonlySet<number>,
+): AddTeamValidation {
+  const n = Number(raw.trim());
+  if (!Number.isInteger(n) || n <= 0) {
+    return { ok: false, reason: 'Enter a valid team number.' };
+  }
+  if (existing.has(n)) {
+    return { ok: false, reason: `Team ${n} is already on the picklist.` };
+  }
+  if (eventTeams.size > 0 && !eventTeams.has(n)) {
+    return { ok: false, reason: `Team ${n} is not competing at this event.` };
+  }
+  return { ok: true, teamNumber: n };
+}
+
 export default function PicklistView(props: PicklistViewProps): JSX.Element {
   const { eventKey } = props;
 
   const [entries, setEntries] = useState<PicklistEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [addValue, setAddValue] = useState('');
+  const [addError, setAddError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -58,6 +90,12 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
   const teamsQuery = useEventTeams(eventKey);
   const allTeams = useMemo(() => teamsQuery.data ?? [], [teamsQuery.data]);
   const teamNumbers = useMemo(() => allTeams.map((t) => t.team_number), [allTeams]);
+  // Membership set + nickname lookup for the add-team validation (BUG-11).
+  const eventTeamSet = useMemo(() => new Set(teamNumbers), [teamNumbers]);
+  const nameByTeam = useMemo(
+    () => new Map(allTeams.map((t) => [t.team_number, t.nickname ?? null])),
+    [allTeams],
+  );
   const matchesQuery = useEventMatches(eventKey);
   // The third arg is accepted-but-UNUSED (EPA is season-wide); passed only for
   // call-site parity with RankingView/NextMatchView so the shared query key stays
@@ -77,6 +115,14 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
     () => new Set(entries.map((e) => e.teamNumber)),
     [entries],
   );
+
+  // Live identity preview: the nickname of a valid, not-yet-added event team the
+  // lead is currently typing (BUG-11: confirm the team exists before adding).
+  const addPreviewName = useMemo(() => {
+    const result = validateAddTeam(addValue, inListTeams, eventTeamSet);
+    if (!result.ok) return null;
+    return nameByTeam.get(result.teamNumber) ?? `Team ${result.teamNumber}`;
+  }, [addValue, inListTeams, eventTeamSet, nameByTeam]);
 
   // Load the picklist on mount / event change.
   useEffect(() => {
@@ -117,7 +163,13 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
   }
 
   function addTeam(): void {
-    addTeamNumber(Number(addValue.trim()));
+    const result = validateAddTeam(addValue, inListTeams, eventTeamSet);
+    if (!result.ok) {
+      setAddError(result.reason);
+      return; // keep the typed value so the lead can correct it
+    }
+    addTeamNumber(result.teamNumber);
+    setAddError(null);
     setAddValue('');
   }
 
@@ -369,13 +421,16 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
         ) : null}
         <CardContent className="space-y-3">
           {/* Add a team */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input
               type="number"
               inputMode="numeric"
               data-testid="pick-add-input"
               value={addValue}
-              onChange={(e) => setAddValue(e.target.value)}
+              onChange={(e) => {
+                setAddValue(e.target.value);
+                if (addError) setAddError(null);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -389,6 +444,17 @@ export default function PicklistView(props: PicklistViewProps): JSX.Element {
             <Button type="button" data-testid="pick-add" onClick={addTeam} className={TOUCH}>
               Add
             </Button>
+            {/* Live identity preview for a valid, not-yet-added event team. */}
+            {addPreviewName ? (
+              <span data-testid="pick-add-preview" className="text-sm text-muted-foreground">
+                {addPreviewName}
+              </span>
+            ) : null}
+            {addError ? (
+              <span data-testid="pick-add-error" className="text-sm text-destructive">
+                {addError}
+              </span>
+            ) : null}
           </div>
 
           {entries.length === 0 ? (

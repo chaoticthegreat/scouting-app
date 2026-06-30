@@ -2,9 +2,10 @@
 // Presentational scout-heartbeat tile for the NextMatchView right column. Pure /
 // prop-driven (no hooks) — the parent supplies coverage, the global last-report
 // stamp, online/pending from useSync(), and a ticking `nowMs` clock. Answers
-// "how many scouts synced for this match + when did the last report land", and
-// is offline-aware (shows pending + an offline note). Degrades to an empty-roster
-// "—" state when scoutsTotal === 0 so a cold-start frame never reads as "3/0".
+// "how many of the match's 6 STATIONS have a report + when did the last report
+// land", and is offline-aware (shows pending + an offline note). Coverage is
+// measured in stations (6 = 3 red + 3 blue), never scout-count, so the count and
+// its aria/title denominator always agree.
 
 import { cn } from '@/lib/utils';
 import { relativeTime } from '@/dash/relativeTime';
@@ -44,11 +45,12 @@ export default function ScoutHeartbeat({
   nowMs,
   heroLabel,
 }: ScoutHeartbeatProps): JSX.Element {
-  const { scoutsCovered, scoutsTotal } = coverage;
-  const emptyRoster = scoutsTotal === 0;
-  // expected = min(cap, roster size || cap) — fall back the cap when roster empty.
-  const expected = Math.min(COVERAGE_STATION_CAP, scoutsTotal || COVERAGE_STATION_CAP);
-  const tone = toneFor(scoutsCovered, expected);
+  // COVERAGE is measured in STATIONS (6 per match: 3 red + 3 blue), NOT scouts —
+  // a roster of 5 still fully covers a match's 6 stations. The big number, its
+  // tone, and the title all key off stationsCovered/6 so the denominator and the
+  // aria/title agree (BUG-9: was scoutsCovered/scoutsTotal vs a /6 title).
+  const stationsCovered = Math.min(coverage.stationsCovered, COVERAGE_STATION_CAP);
+  const tone = toneFor(stationsCovered, COVERAGE_STATION_CAP);
 
   // Per-match stamp when this match has reports, else the global event stamp so a
   // brand-new upcoming match isn't just "no reports yet".
@@ -82,12 +84,13 @@ export default function ScoutHeartbeat({
           <span
             data-testid="scout-heartbeat-count"
             className={cn('text-3xl font-black leading-none tabular-nums', TONE_TEXT[tone])}
-            title={`${coverage.stationsCovered}/${COVERAGE_STATION_CAP} stations reported`}
+            aria-label={`${stationsCovered}/${COVERAGE_STATION_CAP} stations reported`}
+            title={`${stationsCovered}/${COVERAGE_STATION_CAP} stations reported`}
           >
-            {scoutsCovered}/{emptyRoster ? '—' : scoutsTotal}
+            {stationsCovered}/{COVERAGE_STATION_CAP}
           </span>
           <span className="mt-0.5 text-xs text-muted-foreground">
-            scouts synced{heroLabel ? ` for ${heroLabel}` : ''}
+            stations reported{heroLabel ? ` for ${heroLabel}` : ''}
           </span>
         </div>
         <div className="flex flex-col items-end text-right">

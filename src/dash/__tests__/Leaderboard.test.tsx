@@ -74,6 +74,24 @@ describe('parseTbaRankings', () => {
     expect(third.rp).toBe(2.0);
     expect(third.record).toBe('0-0-0');
     expect(third.total).toBe(Math.round(2.0 * 8)); // 16
+
+    // None of these rows carry a real TBA total field → all flagged approximate.
+    expect(rows.every((r) => r.totalApprox)).toBe(true);
+  });
+
+  it('uses a REAL TBA total when present (extra_stats / total_rp) and flags it exact', () => {
+    const rows = parseTbaRankings({
+      rankings: [
+        // total_rp wins over the reconstruction (which would be round(2.5*4)=10).
+        { rank: 1, team_key: 'frc11', sort_orders: [2.5], record: { wins: 2, losses: 1, ties: 1 }, total_rp: 9 },
+        // extra_stats[0] is the running total in many real payloads.
+        { rank: 2, team_key: 'frc22', sort_orders: [2.0], record: { wins: 2, losses: 2, ties: 0 }, extra_stats: [13] },
+      ],
+    });
+    expect(rows[0].total).toBe(9);
+    expect(rows[0].totalApprox).toBe(false);
+    expect(rows[1].total).toBe(13);
+    expect(rows[1].totalApprox).toBe(false);
   });
 
   it('never throws on garbage input', () => {
@@ -95,9 +113,9 @@ describe('parseTbaRankings', () => {
 });
 
 const sampleRows: RankRow[] = [
-  { rank: 1, teamNumber: 254, rp: 3.5, total: 35, record: '10-0-0', wins: 10, losses: 0, ties: 0 },
-  { rank: 2, teamNumber: 3256, rp: 2.111, total: 21, record: '7-2-1', wins: 7, losses: 2, ties: 1 },
-  { rank: 3, teamNumber: 1678, rp: 2.0, total: 16, record: '8-0-0', wins: 8, losses: 0, ties: 0 },
+  { rank: 1, teamNumber: 254, rp: 3.5, total: 35, totalApprox: true, record: '10-0-0', wins: 10, losses: 0, ties: 0 },
+  { rank: 2, teamNumber: 3256, rp: 2.111, total: 21, totalApprox: true, record: '7-2-1', wins: 7, losses: 2, ties: 1 },
+  { rank: 3, teamNumber: 1678, rp: 2.0, total: 16, totalApprox: true, record: '8-0-0', wins: 8, losses: 0, ties: 0 },
 ];
 
 describe('Leaderboard', () => {

@@ -139,8 +139,14 @@ export function isSupersedeRecoverable(message: string | null | undefined): bool
  * caller-owned row as a last resort) makes these recoverable, so they're safe to
  * auto-requeue once after that migration ships — re-sending now carries scout_name
  * and lands on the surviving canonical row instead of dead-lettering again.
+ *
+ * NOTE: Postgres reuses SQLSTATE 23503 for ALL foreign-key violations, so a bare
+ * `23503` match would also swallow a genuine match_key/target_team FK failure (a
+ * bad MANUAL pick — see BUG-1) and pointlessly auto-requeue a report that will
+ * just dead-letter again. We therefore require the message to actually mention the
+ * scout FK; a 23503 that doesn't name `scout` stays terminal.
  */
-const ORPHANED_SCOUT_RECOVERABLE = /\b23503\b|invalid scout_id|no such scout/i;
+const ORPHANED_SCOUT_RECOVERABLE = /invalid scout_id|no such scout|scout_id/i;
 
 export function isOrphanedScoutRecoverable(message: string | null | undefined): boolean {
   if (!message) return false;

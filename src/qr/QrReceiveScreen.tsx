@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { BrowserQRCodeReader } from '@zxing/browser';
-import { Camera, CameraOff, CheckCircle2, RotateCcw } from 'lucide-react';
+import { Camera, CameraOff, CheckCircle2, RotateCcw, UserRound } from 'lucide-react';
 import { FountainDecoder, parseFrame, bytesToReports } from '@/qr/envelope';
 import { decompressForQr, DecompressionUnsupportedError } from '@/qr/compress';
 import { postIngest } from '@/qr/ingestClient';
 import { QR_SCAN_DELAY_MS } from '@/sync/constants';
 import { BackLink } from '@/components/ui/BackLink';
+import { useSession } from '@/auth/useSession';
+import { isScouterLoggedOut } from '@/roster/selectScouter';
 
 type Phase = 'scanning' | 'ingesting' | 'done' | 'error';
 
@@ -38,7 +41,72 @@ const ADOPT_AFTER_FOREIGN_FRAMES = 3;
 //    `{ facingMode: 'environment' }`, which already prefers the rear camera. We
 //    additionally try to resolve a /back|rear|environment/ device by label and
 //    pass its id when one is found (more reliable on multi-camera Android).
+// Guard: the receiver POSTs the decoded batch to the `ingest-reports` Edge
+// Function under THIS device's session JWT. That function (BUG-7) now tolerates a
+// scouter-less receiver server-side, but a device with no scouter selected almost
+// always means the user opened the wrong screen / on the wrong device — and the
+// QR sender tags each report with its author NAME, which the receiver's own
+// identity is irrelevant to. We still prompt to pick a name first so the receiving
+// device is a known, attributable participant (mirrors ScoutHome's name gate), and
+// so the scouter has their assignments/identity ready when they return to scout.
 export default function QrReceiveScreen() {
+  const { scout, loading } = useSession();
+  // A device that durably logged out has a stale scout row server-side; treat it
+  // as no-scouter here, exactly like ScoutHome's gate.
+  const hasScouter = Boolean(scout) && !isScouterLoggedOut();
+
+  // Wait for the first session resolve before deciding (avoids a flash of the
+  // "pick a name" prompt for an already-signed-in scout on a cold load).
+  if (loading) {
+    return (
+      <div
+        data-testid="qr-receive"
+        className="flex min-h-screen flex-col items-center justify-center bg-background px-safe py-safe text-foreground"
+      >
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </div>
+    );
+  }
+
+  if (!hasScouter) {
+    return (
+      <div
+        data-testid="qr-receive"
+        className="flex min-h-screen flex-col bg-background px-safe py-safe text-foreground"
+      >
+        <header className="mb-4 flex items-center gap-3">
+          <BackLink to="/scout" label="Back" icon="back" />
+          <Camera className="size-7 shrink-0 text-brand" aria-hidden />
+          <h1 className="break-words text-xl font-bold leading-tight sm:text-2xl">Receive over QR</h1>
+        </header>
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
+          <div
+            data-testid="qr-receive-needs-scouter"
+            className="flex max-w-md flex-col items-center gap-3 rounded-xl border border-brand/40 bg-brand/10 p-6"
+          >
+            <UserRound className="size-10 shrink-0 text-brand" aria-hidden />
+            <p className="text-base font-medium">Pick your name before receiving reports.</p>
+            <p className="text-sm text-muted-foreground">
+              This device needs a scouter selected so the reports you receive are uploaded under a
+              known identity.
+            </p>
+            <Link
+              data-testid="qr-receive-pick-name"
+              to="/scout"
+              className="mt-1 inline-flex min-h-[44px] items-center gap-2 rounded-md bg-brand px-4 text-sm font-medium text-brand-foreground hover:bg-brand/90"
+            >
+              <UserRound className="size-4" /> Choose your name
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return <QrReceiveScanner />;
+}
+
+function QrReceiveScanner() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const decoderRef = useRef(new FountainDecoder());
   const controlsRef = useRef<{ stop: () => void } | null>(null);

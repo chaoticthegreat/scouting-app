@@ -574,6 +574,47 @@ describe('NextMatchView', () => {
     expect(redPct).toBeLessThan(50);
   });
 
+  it('labels a perfect 50/50 as "Even", never crowns a side (BUG-12)', () => {
+    // Symmetric matchup: every team has the SAME EPA and NO scouting data, so the
+    // two alliance scores are identical -> redWinProb == 0.5.
+    const matches = [
+      {
+        match_key: '2026evt_qm2',
+        event_key: '2026evt',
+        comp_level: 'qm',
+        match_number: 2,
+        scheduled_time: null,
+        red1: RED[0],
+        red2: RED[1],
+        red3: RED[2],
+        blue1: BLUE[0],
+        blue2: BLUE[1],
+        blue3: BLUE[2],
+        actual_red_score: null,
+        actual_blue_score: null,
+        winner: null,
+        result_synced_at: null,
+      },
+    ];
+    const teams = [...RED, ...BLUE].map((t) => ({ team_number: t, nickname: null }));
+    const epaByTeam = new Map<number, number | null>();
+    for (const t of [...RED, ...BLUE]) epaByTeam.set(t, 30);
+
+    useEventMatchesMock.mockReturnValue(dataResult(matches));
+    useEventReportsMock.mockReturnValue(dataResult([])); // no scouting -> pure EPA
+    useEventTeamsMock.mockReturnValue(dataResult(teams));
+    useEventEpaMock.mockReturnValue(dataResult({ epaByTeam, available: true }));
+
+    const { getByTestId } = render(<NextMatchView eventKey="2026evt" />);
+    const redPct = parseInt(getByTestId('dash-next-red-winprob').textContent ?? '', 10);
+    const bluePct = parseInt(getByTestId('dash-next-blue-winprob').textContent ?? '', 10);
+    expect(redPct).toBe(50);
+    expect(bluePct).toBe(50);
+    const label = getByTestId('dash-next-winprob-label').textContent ?? '';
+    expect(label).toMatch(/Even/i);
+    expect(label).not.toMatch(/favored/i);
+  });
+
   it('renders the Nexus-fed upcoming list when Nexus is available', () => {
     setupHappyPath(true);
     useNexusEventStatusMock.mockReturnValue(

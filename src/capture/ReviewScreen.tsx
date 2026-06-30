@@ -308,7 +308,7 @@ export function ReviewScreen(props: {
                     type="number"
                     min={0}
                     value={s.pins}
-                    onChange={(e) => s.setPins(Number(e.target.value))}
+                    onChange={(e) => s.setPins(Math.max(0, Number(e.target.value)))}
                     className={inputClass}
                   />
                 </label>
@@ -318,7 +318,7 @@ export function ReviewScreen(props: {
                     type="number"
                     min={0}
                     value={s.maxFuelCapacityObserved}
-                    onChange={(e) => s.setMaxFuelCapacityObserved(Number(e.target.value))}
+                    onChange={(e) => s.setMaxFuelCapacityObserved(Math.max(0, Number(e.target.value)))}
                     className={inputClass}
                   />
                 </label>
@@ -342,7 +342,7 @@ export function ReviewScreen(props: {
                     type="number"
                     min={0}
                     value={s.foulsMinor}
-                    onChange={(e) => s.setFoulsMinor(Number(e.target.value))}
+                    onChange={(e) => s.setFoulsMinor(Math.max(0, Number(e.target.value)))}
                     className={`${inputClass} ${s.foulsMinor > 0 ? 'border-warning text-warning' : ''}`}
                   />
                 </label>
@@ -352,7 +352,7 @@ export function ReviewScreen(props: {
                     type="number"
                     min={0}
                     value={s.foulsMajor}
-                    onChange={(e) => s.setFoulsMajor(Number(e.target.value))}
+                    onChange={(e) => s.setFoulsMajor(Math.max(0, Number(e.target.value)))}
                     className={`${inputClass} ${s.foulsMajor > 0 ? 'border-destructive text-destructive' : ''}`}
                   />
                 </label>

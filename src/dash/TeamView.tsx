@@ -105,11 +105,14 @@ function fmtPM(mean: number, sd: number): string {
   return `${mean.toFixed(1)} ± ${Number.isFinite(sd) ? sd.toFixed(1) : '0.0'}`;
 }
 function recentFormText(agg: TeamAgg): string {
+  // Guard toFixed against a non-finite delta (latent seam: a malformed/legacy agg)
+  // the same way the other formatters in this file do.
+  const delta = Number.isFinite(agg.recentFuelDelta) ? agg.recentFuelDelta.toFixed(1) : '0.0';
   switch (agg.recentTrend) {
     case 'improving':
-      return `Improving +${agg.recentFuelDelta.toFixed(1)}`;
+      return `Improving +${delta}`;
     case 'fading':
-      return `Fading ${agg.recentFuelDelta.toFixed(1)}`; // delta already negative
+      return `Fading ${delta}`; // delta already negative
     case 'stable':
       return 'Stable';
     default:

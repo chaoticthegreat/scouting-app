@@ -267,8 +267,10 @@ describe('RankingView', () => {
 
     const panel = getByTestId('compare-panel');
     expect(panel).toBeTruthy();
-    expect(within(panel).getByText('254')).toBeTruthy();
-    expect(within(panel).getByText('1678')).toBeTruthy();
+    // The team number appears in the panel (radar legend + per-stat winner table),
+    // so assert it's present at least once rather than requiring a single match.
+    expect(within(panel).getAllByText('254').length).toBeGreaterThan(0);
+    expect(within(panel).getAllByText('1678').length).toBeGreaterThan(0);
   });
 
   describe('user-selectable columns', () => {

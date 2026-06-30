@@ -119,8 +119,32 @@ vi.mock('@/sync/useSync', () => ({
   useSync: () => ({ online: true, queued: 0, deadLetters: 0, syncing: false, syncNow: () => {} }),
 }));
 
-import ScoutHome from '@/capture/ScoutHome';
+import ScoutHome, { normalizeManualMatchKey } from '@/capture/ScoutHome';
 import { db, saveDraft } from '@/db/localStore';
+
+describe('normalizeManualMatchKey (BUG-1)', () => {
+  const ev = '2026txhou1';
+  it('builds the canonical qual key from a bare number', () => {
+    expect(normalizeManualMatchKey('10', ev)).toBe('2026txhou1_qm10');
+    expect(normalizeManualMatchKey(' 7 ', ev)).toBe('2026txhou1_qm7');
+    // Leading zeros are stripped.
+    expect(normalizeManualMatchKey('007', ev)).toBe('2026txhou1_qm7');
+  });
+  it('accepts q/qm-prefixed tokens', () => {
+    expect(normalizeManualMatchKey('qm10', ev)).toBe('2026txhou1_qm10');
+    expect(normalizeManualMatchKey('q10', ev)).toBe('2026txhou1_qm10');
+    expect(normalizeManualMatchKey('QM10', ev)).toBe('2026txhou1_qm10');
+  });
+  it('trusts a pasted full key verbatim (incl. playoffs)', () => {
+    expect(normalizeManualMatchKey('2026txhou1_qm10', ev)).toBe('2026txhou1_qm10');
+    expect(normalizeManualMatchKey('2026txhou1_sf3m1', ev)).toBe('2026txhou1_sf3m1');
+  });
+  it('returns empty for unparseable / zero / blank input', () => {
+    expect(normalizeManualMatchKey('', ev)).toBe('');
+    expect(normalizeManualMatchKey('abc', ev)).toBe('');
+    expect(normalizeManualMatchKey('0', ev)).toBe('');
+  });
+});
 
 // ScoutHome reads ?mode from the URL via useSearchParams, so renders need a
 // Router. `route` lets a test deep-link into a mode (e.g. /scout?mode=pit).
@@ -178,8 +202,10 @@ describe('ScoutHome resume click', () => {
     renderHome();
     const item = await screen.findByTestId('scout-resume-qm7:scout-1:222');
     fireEvent.click(item);
-    // The capture flow now opens on the robot-placement step; submitting it
-    // advances to the live match screen with the START button.
+    // The capture flow now opens on the robot-placement step; a placement tap is
+    // required before the submit button enables, then it advances to the live
+    // match screen with the START button.
+    fireEvent.pointerUp(await screen.findByTestId('capture-field'), { pointerId: 1 });
     const submit = await screen.findByTestId('capture-placement-submit');
     fireEvent.click(submit);
     await waitFor(() => {

@@ -4,11 +4,12 @@ import { MemoryRouter } from 'react-router-dom';
 
 // Hoisted mock fns — vi.mock factories run before module-level consts, so the
 // shared spies must come from vi.hoisted().
-const { toCanvas, getSyncQueue } = vi.hoisted(() => ({
+const { toCanvas, getSyncQueue, listDeadLetters } = vi.hoisted(() => ({
   // toCanvas(canvasEl, text, opts) — capture the payload string (2nd arg) so we
   // can decode the fountain stream. Resolves so the screen's `void` await is happy.
   toCanvas: vi.fn(async (_canvas: unknown, _text: string) => undefined),
   getSyncQueue: vi.fn(),
+  listDeadLetters: vi.fn(),
 }));
 
 // Mock qrcode so we never touch a real canvas in jsdom — the screen now draws
@@ -27,6 +28,9 @@ const renderedPayloads = (): string[] => toCanvas.mock.calls.map((c) => c[1] as 
 // wire shape) before fountain-encoding.
 vi.mock('@/db/localStore', () => ({
   getSyncQueue: () => getSyncQueue(),
+  // QR-send unions the dirty/pending queue with DEAD-LETTERED reports so a stuck
+  // report can still be hand-carried off-device (BUG-2). Default: none stuck.
+  listDeadLetters: () => listDeadLetters(),
 }));
 
 // Identity compression: keep the encode path synchronous and the decoded bytes
@@ -75,6 +79,9 @@ const expectedWire = sampleUpsertPayloads();
 beforeEach(() => {
   toCanvas.mockClear();
   getSyncQueue.mockReset();
+  listDeadLetters.mockReset();
+  // Most tests don't exercise dead-letters; default to an empty stuck-list.
+  listDeadLetters.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -200,6 +207,40 @@ describe('QrSendScreen', () => {
       expect(screen.getByText(/nothing to send/i)).toBeTruthy();
     });
     expect(screen.queryByTestId('qr-frame')).toBeNull();
+  });
+
+  it('INCLUDES dead-lettered reports in the QR batch (BUG-2 rescue path)', async () => {
+    vi.useFakeTimers();
+    // No dirty/pending reports — only a stuck (error) report remains. It MUST still
+    // be carried so it can be rescued onto another device.
+    getSyncQueue.mockResolvedValue([]);
+    listDeadLetters.mockResolvedValue(backlog);
+    render(
+      <MemoryRouter>
+        <QrSendScreen />
+      </MemoryRouter>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    for (let i = 0; i < 80; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => {
+        vi.advanceTimersByTime(QR_FRAME_MS);
+        await Promise.resolve();
+      });
+    }
+    const decoder = new FountainDecoder();
+    for (const payload of renderedPayloads()) {
+      if (decoder.complete) break;
+      const f = parseFrame(payload);
+      if (f) decoder.add(f);
+    }
+    expect(decoder.complete).toBe(true);
+    const decoded = bytesToReports(decoder.payloadBytes());
+    expect(decoded).toEqual(expectedWire);
   });
 
   it('advances the sent-symbol counter over time', async () => {

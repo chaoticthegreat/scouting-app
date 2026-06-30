@@ -1,8 +1,19 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { getStoredActiveEvent, setStoredActiveEvent } from './activeEventStore';
 
 export const ACTIVE_EVENT_KEY = ['active-event'] as const;
+
+/**
+ * How often (ms) to re-resolve the active event as a safety net. The active
+ * event is a global singleton a lead can flip from ANOTHER device; without a
+ * re-resolve this browser would render the old event's data tabs until a manual
+ * reload (BUG-LIVE-2). Realtime (when the `event` table is published) does the
+ * instant work; this slow poll + a window-focus refetch are the always-present
+ * fallbacks. Kept slow — the key changes at most a few times per event.
+ */
+const ACTIVE_EVENT_POLL_MS = 60_000;
 
 export interface ActiveEvent {
   eventKey: string | null;
@@ -22,10 +33,15 @@ interface EventRow {
  */
 export function useActiveEvent(): ActiveEvent {
   const stored = getStoredActiveEvent();
+  const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: ACTIVE_EVENT_KEY,
     initialData: stored ?? undefined,
+    // Re-resolve on tab focus and on a slow interval so a switch made on another
+    // device propagates to the data tabs without a manual reload (BUG-LIVE-2).
+    refetchOnWindowFocus: true,
+    refetchInterval: ACTIVE_EVENT_POLL_MS,
     queryFn: async (): Promise<string | null> => {
       const { data, error } = await supabase
         .from('event')
@@ -49,6 +65,27 @@ export function useActiveEvent(): ActiveEvent {
       return next ?? persisted ?? null;
     },
   });
+
+  // Realtime: when the `event` table is in the Supabase realtime publication, a
+  // flip of `is_active` on ANY device pushes here and we re-resolve immediately.
+  // Harmless no-op when the table isn't published or the client lacks Realtime
+  // (e.g. mocked in unit tests) — the focus/interval refetch above still covers it.
+  useEffect(() => {
+    if (typeof supabase.channel !== 'function') return;
+    const channel = supabase
+      .channel('active-event')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'event' },
+        () => {
+          void queryClient.invalidateQueries({ queryKey: ACTIVE_EVENT_KEY });
+        },
+      )
+      .subscribe();
+    return () => {
+      if (typeof supabase.removeChannel === 'function') supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   return {
     eventKey: query.data ?? stored ?? null,

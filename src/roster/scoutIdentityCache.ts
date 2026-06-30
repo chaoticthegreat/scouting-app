@@ -76,6 +76,16 @@ export function getCachedScoutIdentity(eventKey: string, name: string): ScoutRow
  * consolidated by select_scouter), but it CAN re-attach the report to the right
  * scouter by name. Best-effort: a miss just means the report ingests under a
  * generic "Imported scout" identity instead of failing.
+ *
+ * NOTE (BUG-17): this only resolves scout_ids THIS device has itself signed in as
+ * (its own captures). A report carried in from ANOTHER device via QR/import keeps
+ * the originating device's per-device scout_id, which we have no local name for —
+ * the roster cache only knows scouter_roster ids (a different id space), not
+ * per-device scout rows, so there is no local source that maps a foreign scout_id
+ * back to a name. Broadening to the roster cache would therefore not help; the
+ * server-side resolve (upsert 0030/0032) and the receiver's own re-tagging are the
+ * correct place to recover a foreign name, so we intentionally do not over-reach
+ * here.
  */
 export function getCachedDisplayNameForScoutId(scoutId: string): string | null {
   if (!scoutId) return null;

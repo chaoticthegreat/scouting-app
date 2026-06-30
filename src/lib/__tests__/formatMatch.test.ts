@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   formatMatchKey,
   formatMatchKeyRaw,
+  formatMatchShort,
   compareMatchKeys,
   isQualLevel,
   isQualMatchKey,
@@ -48,6 +49,33 @@ describe('formatMatchKeyRaw', () => {
     expect(formatMatchKeyRaw('qm7')).toBe('Qual 7');
     expect(formatMatchKeyRaw('')).toBe('');
     expect(formatMatchKeyRaw('garbage')).toBe('garbage');
+  });
+});
+
+describe('formatMatchShort', () => {
+  it('compresses qual keys to "Q<n>"', () => {
+    expect(formatMatchShort('2026casnv_qm1')).toBe('Q1');
+    expect(formatMatchShort('2026casnv_qm15')).toBe('Q15');
+    expect(formatMatchShort('qm7')).toBe('Q7');
+  });
+  it('uses the SET number for non-final playoff rounds (BUG-8: replays keep their set)', () => {
+    expect(formatMatchShort('2026casnv_sf3m1')).toBe('SF3');
+    // Replay of set 3 (game 2) must stay "SF3" — NOT "SF2" (the game number).
+    expect(formatMatchShort('2026casnv_sf3m2')).toBe('SF3');
+    expect(formatMatchShort('2026casnv_qf2m1')).toBe('QF2');
+    expect(formatMatchShort('2026casnv_ef1m1')).toBe('EF1');
+  });
+  it('uses the GAME number for finals (best-of-N within one set)', () => {
+    expect(formatMatchShort('2026casnv_f1m1')).toBe('F1');
+    expect(formatMatchShort('2026casnv_f1m2')).toBe('F2');
+    expect(formatMatchShort('2026casnv_f1m3')).toBe('F3');
+    // No game suffix → fall back to the set number.
+    expect(formatMatchShort('2026casnv_f1')).toBe('F1');
+  });
+  it('handles bare tokens and empty input', () => {
+    expect(formatMatchShort('')).toBe('');
+    expect(formatMatchShort(null)).toBe('');
+    expect(formatMatchShort('garbage')).toBe('garbage');
   });
 });
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { Button } from '@/components/ui/button';
-import { getSyncQueue } from '@/db/localStore';
+import { getSyncQueue, listDeadLetters } from '@/db/localStore';
 import { toUpsertPayload } from '@/sync/mapReport';
 import { getCachedDisplayNameForScoutId } from '@/roster/scoutIdentityCache';
 import { FountainEncoder, frameToString, reportsToBytes } from '@/qr/envelope';
@@ -36,7 +36,16 @@ export default function QrSendScreen() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const queue = (await getSyncQueue()).map((r) => {
+      // The QR batch is the device-to-device RESCUE path, so it must carry the
+      // DEAD-LETTERED ('error') reports too — those are the ones that most need to
+      // be hand-carried to another device to sync (BUG-2). getSyncQueue() only
+      // returns dirty/pending (the auto-retry worklist deliberately excludes error),
+      // so union it with listDeadLetters(). De-dupe by id in case a row appears in
+      // both. The wire/merge shape is unchanged.
+      const [pending, dead] = await Promise.all([getSyncQueue(), listDeadLetters()]);
+      const byId = new Map<string, (typeof pending)[number]>();
+      for (const r of [...pending, ...dead]) byId.set(r.id, r);
+      const queue = [...byId.values()].map((r) => {
         const payload = toUpsertPayload(r);
         const name = getCachedDisplayNameForScoutId(r.scoutId);
         return name ? { ...payload, scout_name: name } : payload;

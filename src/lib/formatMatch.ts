@@ -105,3 +105,29 @@ export function formatMatchKeyRaw(matchKey: string | null | undefined): string {
   }
   return formatMatchKey(level, setNum);
 }
+
+/**
+ * Broadcast-compact label from a RAW match key: "2026casnv_qm15" → "Q15",
+ * "..._sf3m2" → "SF3", "..._f1m2" → "F2". Playoff rounds key off the SET number
+ * (the bracket position), NOT the game-within-set — so a double-elim replay
+ * "sf3m2" reads "SF3" (set 3), not "SF2". Finals are a best-of-N within ONE set,
+ * so the GAME number is the meaningful one ("f1m2" → "F2"). Unparseable keys
+ * fall back to the formatted long label.
+ */
+export function formatMatchShort(matchKey: string | null | undefined): string {
+  if (!matchKey) return '';
+  const tail = matchKey.includes('_') ? matchKey.slice(matchKey.lastIndexOf('_') + 1) : matchKey;
+  const m = tail.match(/^([a-zA-Z]+)(\d+)(?:m(\d+))?/);
+  if (!m) return formatMatchKeyRaw(matchKey);
+  const lvl = m[1].toLowerCase();
+  const setNum = Number(m[2]);
+  const within = m[3] != null ? Number(m[3]) : null;
+  if (lvl === 'qm' || lvl === 'q' || lvl === 'qual') return `Q${setNum}`;
+  if (lvl === 'ef') return `EF${setNum}`;
+  if (lvl === 'qf') return `QF${setNum}`;
+  if (lvl === 'sf') return `SF${setNum}`;
+  // Finals: best-of-N within one set, so the game number is what matters.
+  if (lvl === 'f' || lvl === 'final') return `F${within ?? setNum}`;
+  const first = lvl.charAt(0).toUpperCase();
+  return `${first}${setNum}`;
+}

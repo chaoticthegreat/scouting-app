@@ -34,17 +34,28 @@ export default function MatchupNotesModal({
   const queryClient = useQueryClient();
   const [text, setText] = useState(initialNote);
   const [saving, setSaving] = useState(false);
+  // Freeze the pairing (and seed note) the editor opened against. The parent
+  // recomputes ourTeams/oppTeams/oppLead from live match data, so without this a
+  // background refresh mid-edit could redirect Save to a different pairing — or
+  // silently reset the in-progress note. Pinned to the open transition only.
+  const [frozen, setFrozen] = useState({ ourTeams, oppTeams, oppLead, note: initialNote });
 
-  // Re-sync the textarea when the sheet (re)opens or the source note changes.
+  // Re-sync the textarea + pinned pairing when the sheet opens. Intentionally
+  // keyed on `open` alone: once editing, everything stays pinned to what the user
+  // opened, immune to background team/note updates.
   useEffect(() => {
-    if (open) setText(initialNote);
-  }, [open, initialNote]);
+    if (open) {
+      setText(initialNote);
+      setFrozen({ ourTeams, oppTeams, oppLead, note: initialNote });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const onSave = async () => {
     if (saving) return;
     setSaving(true);
     try {
-      await saveMatchupNote(eventKey, ourTeams, oppTeams, text);
+      await saveMatchupNote(eventKey, frozen.ourTeams, frozen.oppTeams, text);
       await queryClient.invalidateQueries({ queryKey: ['matchup-notes', eventKey] });
       onClose();
     } finally {
@@ -52,17 +63,19 @@ export default function MatchupNotesModal({
     }
   };
 
+  const headerLead = frozen.oppLead;
+
   return (
     <Sheet
       open={open}
       onClose={onClose}
-      title={`Notes vs alliance lead ${oppLead}`}
+      title={`Notes vs alliance lead ${headerLead}`}
       data-testid="matchup-notes-sheet"
     >
       <div className="flex h-full flex-col gap-3">
         <p className="text-xs text-muted-foreground">
           Event-scoped note keyed on the alliance lead team — it resurfaces for any
-          future match against alliance lead {oppLead} at this event.
+          future match against alliance lead {headerLead} at this event.
         </p>
         <textarea
           data-testid="matchup-notes-textarea"

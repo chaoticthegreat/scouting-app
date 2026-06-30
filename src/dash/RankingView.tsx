@@ -19,6 +19,7 @@ import {
   useTbaRankings,
 } from '@/dash/useEventData';
 import { rankSortValue, resolveRowEpa } from '@/dash/sorting';
+import { TeamCompare, MAX_COMPARE_TEAMS } from '@/dash/TeamCompare';
 
 export interface RankingViewProps {
   eventKey: string;
@@ -36,7 +37,9 @@ interface TbaRankingsResponse {
 }
 
 const EM_DASH = '—';
-const MAX_COMPARE = 4;
+// Up to 6 teams can be compared at once (the radar overlay palette + the
+// per-stat winner table both read cleanly through 6).
+const MAX_COMPARE = MAX_COMPARE_TEAMS;
 
 /** localStorage key persisting the lead's chosen visible stat columns. */
 const VISIBLE_COLUMNS_KEY = 'ranking-visible-columns';
@@ -179,11 +182,13 @@ interface CompareRow {
 
 /** Display label for the recent-form trend (em-dash when insufficient data). */
 function trendLabel(agg: TeamAgg): string {
+  // Guard toFixed against a non-finite delta (latent seam) like the other formatters.
+  const delta = Number.isFinite(agg.recentFuelDelta) ? agg.recentFuelDelta.toFixed(1) : '0.0';
   switch (agg.recentTrend) {
     case 'improving':
-      return `Improving +${agg.recentFuelDelta.toFixed(1)}`;
+      return `Improving +${delta}`;
     case 'fading':
-      return `Fading ${agg.recentFuelDelta.toFixed(1)}`;
+      return `Fading ${delta}`;
     case 'stable':
       return 'Stable';
     default:
@@ -412,7 +417,7 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
   function toggleSelect(teamNumber: number): void {
     setSelected((prev) => {
       if (prev.includes(teamNumber)) return prev.filter((t) => t !== teamNumber);
-      if (prev.length >= MAX_COMPARE) return prev; // cap at ~4
+      if (prev.length >= MAX_COMPARE) return prev; // cap at MAX_COMPARE
       return [...prev, teamNumber];
     });
   }
@@ -694,6 +699,14 @@ export default function RankingView(props: RankingViewProps): JSX.Element {
           <CardHeader>
             <CardTitle>Compare ({selectedRows.length})</CardTitle>
           </CardHeader>
+          {/* Radar overlay across the key scouting+EPA metrics. Reuses the row's
+              agg + resolved EPA directly — no refetch. Shows its own empty state
+              until 2+ teams are selected. */}
+          <CardContent className="border-b border-border pb-4">
+            <TeamCompare
+              teams={selectedRows.map((r) => ({ agg: r.agg, epa: r.epa }))}
+            />
+          </CardContent>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm">

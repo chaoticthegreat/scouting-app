@@ -438,17 +438,23 @@ export function CaptureScreen(props: {
             </div>
           </div>
         </div>
+        {/* Require a placement tap before starting: without a start position the
+            saved report drops out of the dashboard auto-heatmap and the known-auto
+            reuse picker (autoStartPosition would silently persist as null). The
+            button stays disabled until the scout taps the field. */}
         <Button
           data-testid="capture-placement-submit"
           variant="brand"
           size="big"
           className="h-14 shrink-0 text-xl"
+          disabled={!s.autoStartPosition}
           onClick={() => {
+            if (!s.autoStartPosition) return;
             setPlaced(true);
             buzz(25);
           }}
         >
-          <Play /> Submit / Start match
+          <Play /> {s.autoStartPosition ? 'Submit / Start match' : 'Tap the field to place'}
         </Button>
       </div>
     );

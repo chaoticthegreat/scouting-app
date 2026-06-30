@@ -19,7 +19,9 @@ export interface RankRow {
   rank: number;
   teamNumber: number;
   rp: number; // ranking score (avg RP)
-  total: number; // total ranking points (≈ rp * matchesPlayed), integer
+  total: number; // total ranking points: TBA's real value when available, else ≈ rp * matchesPlayed
+  /** True when `total` is our reconstructed estimate (rp × games), not a real TBA field. */
+  totalApprox: boolean;
   record: string; // "W-L-T"
   wins: number;
   losses: number;
@@ -34,6 +36,11 @@ interface TbaRankingsResponse {
 /** Coerce an unknown into a finite number, or `fallback` when it isn't one. */
 function num(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+/** A finite number, or null when the value isn't a usable number. */
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -69,13 +76,22 @@ export function parseTbaRankings(data: unknown): RankRow[] {
 
     // Games played: prefer the record, fall back to matches_played when absent.
     const gamesPlayed = rec ? wins + losses + ties : num(r.matches_played, 0);
-    const total = Math.round(rp * gamesPlayed);
+
+    // Total RP: prefer a REAL TBA field when present (some payloads carry the
+    // running total under a `total_rp` field or `extra_stats[0]`) over a
+    // reconstruction. Only fall back to `round(rp × games)` — flagged approximate
+    // so the UI never implies a precision TBA didn't give us.
+    const extraStats = Array.isArray(r.extra_stats) ? r.extra_stats : [];
+    const realTotal = finiteOrNull(r.total_rp) ?? finiteOrNull(extraStats[0]);
+    const total = realTotal != null ? realTotal : Math.round(rp * gamesPlayed);
+    const totalApprox = realTotal == null;
 
     rows.push({
       rank: r.rank,
       teamNumber,
       rp,
       total,
+      totalApprox,
       record: `${wins}-${losses}-${ties}`,
       wins,
       losses,
@@ -122,7 +138,12 @@ export default function Leaderboard(props: LeaderboardProps): JSX.Element {
                     <th className="px-2 py-2 text-left font-medium text-muted-foreground">#</th>
                     <th className="px-2 py-2 text-left font-medium text-muted-foreground">Team</th>
                     <th className="px-2 py-2 text-right font-medium text-muted-foreground">RP</th>
-                    <th className="px-2 py-2 text-right font-medium text-muted-foreground">Tot</th>
+                    <th
+                      className="px-2 py-2 text-right font-medium text-muted-foreground"
+                      title="Total ranking points. '~' marks an estimate (avg RP × games) when TBA doesn't report a real total."
+                    >
+                      Tot
+                    </th>
                     <th className="px-2 py-2 text-left font-medium text-muted-foreground">Rec</th>
                   </tr>
                 </thead>
@@ -142,7 +163,18 @@ export default function Leaderboard(props: LeaderboardProps): JSX.Element {
                         <td className="px-2 py-2 tabular-nums">{row.rank}</td>
                         <td className="px-2 py-2 tabular-nums font-medium">{row.teamNumber}</td>
                         <td className="px-2 py-2 text-right tabular-nums">{row.rp.toFixed(3)}</td>
-                        <td className="px-2 py-2 text-right tabular-nums">{row.total}</td>
+                        <td
+                          data-testid={`leaderboard-total-${row.teamNumber}`}
+                          className="px-2 py-2 text-right tabular-nums"
+                          title={
+                            row.totalApprox
+                              ? 'Estimated total RP (avg RP × games) — TBA did not report a real total'
+                              : undefined
+                          }
+                        >
+                          {row.totalApprox ? '~' : ''}
+                          {row.total}
+                        </td>
                         <td
                           className={cn(
                             'px-2 py-2 tabular-nums',

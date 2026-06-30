@@ -26,7 +26,7 @@ import {
 } from '@/dash/useEventData';
 import type { NexusEventStatus, NexusMatch } from '@/dash/nexusClient';
 import { aggregateEvent, type TeamAgg } from '@/dash/aggregate';
-import { formatMatchKeyRaw, compareMatchKeys, isQualLevel } from '@/lib/formatMatch';
+import { formatMatchKeyRaw, formatMatchShort, compareMatchKeys, isQualLevel } from '@/lib/formatMatch';
 import PlayoffPath from '@/dash/PlayoffPath';
 import { predictMatch, type TeamPrediction } from '@/dash/predict';
 import CombinedAutoField from '@/dash/CombinedAutoField';
@@ -159,19 +159,27 @@ function FuelLowConfidenceChip() {
   );
 }
 
-/** Compress a match label to broadcast form: "Qualification 15"/"Qual 15" → "Q15". */
+/**
+ * Compress a free-form match LABEL (e.g. a Nexus "Semifinal 3 Match 2" or our own
+ * "Semi 3-2") to broadcast form: "Qualification 15" → "Q15", "Semi 3-2" → "SF3".
+ * For raw match KEYS, prefer `formatMatchShort` (authoritative). Playoff rounds
+ * key off the SET number — the FIRST number in the label — so a replayed set
+ * ("Semi 3-2") reads "SF3", not the game number "SF2". Finals are best-of-N
+ * within one set, so there the LAST number (the game) is the meaningful one.
+ */
 function shortMatchLabel(label: string): string {
-  const m = /(\d+)\s*$/.exec(label);
-  const num = m ? m[1] : '';
   const lower = label.toLowerCase();
+  const first = /(\d+)/.exec(label)?.[1] ?? '';
+  const last = /(\d+)\s*$/.exec(label)?.[1] ?? '';
   // Order matters: test the more specific prefixes BEFORE the bare "q", otherwise
   // "Quarterfinal"/"Quarter" gets swallowed by the "q" → "Q{n}" branch.
-  if (lower.startsWith('qf') || lower.startsWith('quarter')) return `QF${num}`;
-  if (lower.startsWith('sf') || lower.startsWith('semi')) return `SF${num}`;
-  if (lower.startsWith('qm') || lower.startsWith('qual') || lower.startsWith('q')) return `Q${num}`;
-  if (lower.startsWith('f') || lower.startsWith('final')) return `F${num}`;
-  const first = label.trim().charAt(0).toUpperCase();
-  return num ? `${first}${num}` : label;
+  if (lower.startsWith('qf') || lower.startsWith('quarter')) return `QF${first}`;
+  if (lower.startsWith('sf') || lower.startsWith('semi')) return `SF${first}`;
+  if (lower.startsWith('ef') || lower.startsWith('eighth')) return `EF${first}`;
+  if (lower.startsWith('qm') || lower.startsWith('qual') || lower.startsWith('q')) return `Q${first}`;
+  if (lower.startsWith('f') || lower.startsWith('final')) return `F${last || first}`;
+  const initial = label.trim().charAt(0).toUpperCase();
+  return first ? `${initial}${first}` : label;
 }
 
 /** Weekday + short time, e.g. "Wed 2:24 AM", for a unix-ms timestamp. */
@@ -338,7 +346,11 @@ function WinProbBanner({
 }) {
   const redProb = Math.min(1, Math.max(0, redWinProb));
   const blueProb = 1 - redProb;
-  const redFavored = redProb >= blueProb;
+  // A perfect 50/50 (within rounding) is a genuine toss-up — don't crown a side.
+  // Round to whole percent first so e.g. 0.502 still reads "Even".
+  const even = Math.round(redProb * 100) === Math.round(blueProb * 100);
+  const redFavored = !even && redProb >= blueProb;
+  const blueFavored = !even && blueProb > redProb;
   // Clamp the bar split so the trailing side never fully vanishes (keeps both
   // colors legible even in a blowout prediction).
   const redPct = Math.min(92, Math.max(8, Math.round(redProb * 100)));
@@ -370,7 +382,8 @@ function WinProbBanner({
             data-testid="dash-next-red-winprob"
             className={cn(
               'tabular-nums font-black leading-none text-red-400',
-              redFavored ? 'text-5xl sm:text-6xl' : 'text-3xl sm:text-4xl opacity-70',
+              redFavored ? 'text-5xl sm:text-6xl' : 'text-3xl sm:text-4xl',
+              blueFavored && 'opacity-70',
             )}
           >
             {pct(redProb)}
@@ -384,7 +397,8 @@ function WinProbBanner({
             data-testid="dash-next-blue-winprob"
             className={cn(
               'tabular-nums font-black leading-none text-blue-400',
-              !redFavored ? 'text-5xl sm:text-6xl' : 'text-3xl sm:text-4xl opacity-70',
+              blueFavored ? 'text-5xl sm:text-6xl' : 'text-3xl sm:text-4xl',
+              redFavored && 'opacity-70',
             )}
           >
             {pct(blueProb)}
@@ -405,12 +419,17 @@ function WinProbBanner({
           <div
             className={cn(
               'h-full flex-1 bg-blue-500 transition-all',
-              !redFavored && 'shadow-[0_0_12px] shadow-blue-500/50',
+              blueFavored && 'shadow-[0_0_12px] shadow-blue-500/50',
             )}
           />
         </div>
-        <div className="mt-1.5 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {redFavored ? (
+        <div
+          data-testid="dash-next-winprob-label"
+          className="mt-1.5 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+        >
+          {even ? (
+            <span className="text-muted-foreground">Even · toss-up</span>
+          ) : redFavored ? (
             <span className="text-red-400">Red favored</span>
           ) : (
             <span className="text-blue-400">Blue favored</span>
@@ -457,6 +476,8 @@ function FieldTile({
 interface UpcomingItem {
   key: string;
   label: string;
+  /** True when `label` is a live Nexus label (else it's our formatted schedule label). */
+  nexusLabel: boolean;
   red: number[];
   blue: number[];
   time: string | null;
@@ -464,10 +485,13 @@ interface UpcomingItem {
 }
 function UpcomingCard({ u, baseTeam }: { u: UpcomingItem; baseTeam: number }) {
   const idx = [0, 1, 2];
+  // Authoritative set-correct short label from the raw key when there's no Nexus
+  // label; else compress the Nexus label string.
+  const short = u.nexusLabel ? shortMatchLabel(u.label) : formatMatchShort(u.key);
   return (
     <li className="overflow-hidden rounded-lg border-l-4 border-red-500 bg-card/60">
       <div className="flex items-center justify-between gap-2 px-3 py-1.5">
-        <span className="font-bold text-foreground">{shortMatchLabel(u.label)}</span>
+        <span className="font-bold text-foreground">{short}</span>
         {u.time ? <span className="text-xs text-muted-foreground">{u.time}</span> : null}
       </div>
       <div className="grid grid-cols-3 gap-px bg-border/30 p-px">
@@ -643,9 +667,12 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
 
   const status = nexusLive ? nexus.status : null;
   const heroNexus = nexusMatchFor(status, match);
-  // Prefer a Nexus live label for the hero; else the formatted schedule label.
-  const heroLabelFull = heroNexus?.label ?? formatMatchKeyRaw(match.match_key);
-  const heroLabel = shortMatchLabel(heroLabelFull);
+  // For the compact hero number use the authoritative raw-key short label when we
+  // have no Nexus label (set-correct for double-elim replays); else compress the
+  // Nexus label string.
+  const heroLabel = heroNexus?.label
+    ? shortMatchLabel(heroNexus.label)
+    : formatMatchShort(match.match_key);
   const heroTime =
     shortTimeMs(heroNexus?.times.estimatedStartTime ?? null) ?? shortTime(match.scheduled_time);
   // Status line under the hero match number. Prefer live Nexus ETAs ("Queues in
@@ -695,7 +722,7 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
   const frontierRow =
     (status?.onField ? matchRowForNexus(allMatches, status.onField) : null) ??
     (status?.queuing ? matchRowForNexus(allMatches, status.queuing) : null);
-  const upcoming: Array<{ key: string; label: string; red: number[]; blue: number[]; time: string | null; isOurs: boolean }> =
+  const upcoming: UpcomingItem[] =
     allMatches
       .filter((m) => redTeamsOf(m).includes(baseTeam) || blueTeamsOf(m).includes(baseTeam))
       .filter((m) => isUnplayedMatch(m))
@@ -707,6 +734,7 @@ export default function NextMatchView({ eventKey }: NextMatchViewProps): JSX.Ele
         return {
           key: m.match_key,
           label: nm?.label ?? formatMatchKeyRaw(m.match_key),
+          nexusLabel: nm?.label != null,
           red: redTeamsOf(m),
           blue: blueTeamsOf(m),
           time: dayTimeMs(nm?.times.estimatedStartTime ?? null) ?? dayTime(m.scheduled_time),

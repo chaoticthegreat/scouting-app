@@ -85,6 +85,7 @@ beforeEach(() => {
   teamsFixture = [
     { team_number: 254, nickname: 'The Cheesy Poofs' },
     { team_number: 1678, nickname: 'Citrus Circuits' },
+    { team_number: 9999, nickname: 'Test Bots' },
   ];
   getPicklistMock.mockResolvedValue(TWO.map((e) => ({ ...e })));
   savePicklistMock.mockResolvedValue(undefined);
@@ -143,7 +144,7 @@ describe('PicklistView', () => {
     const { getByTestId, getAllByTestId } = await renderLoaded();
     const input = getByTestId('pick-add-input') as HTMLInputElement;
 
-    // valid new team appends
+    // valid new event team appends
     fireEvent.change(input, { target: { value: '9999' } });
     fireEvent.click(getByTestId('pick-add'));
     await waitFor(() => expect(getByTestId('pick-row-9999')).toBeTruthy());
@@ -157,6 +158,24 @@ describe('PicklistView', () => {
     fireEvent.change(input, { target: { value: 'abc' } });
     fireEvent.click(getByTestId('pick-add'));
     expect(getAllByTestId(/^pick-row-/).length).toBe(3);
+  });
+
+  it('rejects a team not competing at the event and surfaces a warning (BUG-11)', async () => {
+    const { getByTestId, getAllByTestId, queryByTestId } = await renderLoaded();
+    const input = getByTestId('pick-add-input') as HTMLInputElement;
+
+    // 88888 is not in teamsFixture → rejected, error shown, no row added
+    fireEvent.change(input, { target: { value: '88888' } });
+    fireEvent.click(getByTestId('pick-add'));
+    expect(getAllByTestId(/^pick-row-/).length).toBe(2);
+    expect(getByTestId('pick-add-error').textContent).toMatch(/not competing/i);
+    // the bogus value is kept so the lead can correct it
+    expect(input.value).toBe('88888');
+
+    // typing a valid event team clears the error and previews its name
+    fireEvent.change(input, { target: { value: '9999' } });
+    expect(queryByTestId('pick-add-error')).toBeNull();
+    expect(getByTestId('pick-add-preview').textContent).toBe('Test Bots');
   });
 
   it('reorders rows with up/down', async () => {

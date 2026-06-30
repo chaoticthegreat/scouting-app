@@ -34,9 +34,11 @@ beforeEach(async () => {
   await db.drafts.clear();
 });
 
-// The pre-match placement step now gates the live screen: submit it first to
-// reach the in-match controls (START etc.).
+// The pre-match placement step now gates the live screen: a placement tap is
+// REQUIRED (the submit button is disabled until the field is tapped), so place the
+// robot first, then submit, to reach the in-match controls (START etc.).
 function submitPlacement() {
+  fireEvent.pointerUp(screen.getByTestId('capture-field'), { pointerId: 1 });
   fireEvent.click(screen.getByTestId('capture-placement-submit'));
 }
 
@@ -72,6 +74,22 @@ describe('CaptureScreen placement step', () => {
     // Field is in pick-start mode during placement.
     expect(screen.getByTestId('capture-field').getAttribute('data-mode')).toBe('pick-start');
     submitPlacement();
+    expect(screen.getByTestId('capture-start')).toBeTruthy();
+  });
+
+  it('keeps the submit button DISABLED until a placement tap is made', () => {
+    render(<Host />);
+    const submit = screen.getByTestId('capture-placement-submit') as HTMLButtonElement;
+    // No start position yet → disabled, and clicking does NOT advance.
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(submit);
+    expect(screen.queryByTestId('capture-start')).toBeNull();
+    // Tap the field to place the robot → submit enables and advances.
+    fireEvent.pointerUp(screen.getByTestId('capture-field'), { pointerId: 1 });
+    expect((screen.getByTestId('capture-placement-submit') as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByTestId('capture-placement-submit'));
     expect(screen.getByTestId('capture-start')).toBeTruthy();
   });
 

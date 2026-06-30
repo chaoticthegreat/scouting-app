@@ -140,6 +140,46 @@ describe('PicklistEpaBoard', () => {
     expect(getByTestId('epa-board-epa-1678').textContent).toContain('—');
   });
 
+  it('renders a non-empty strength bar for each ranked team even when all EPA <= 0 (BUG-13)', () => {
+    // All-zero in-house estimates: maxEpa would be 0, which previously zeroed
+    // EVERY bar. Each ranked team should still get a minimal (equal) bar.
+    const zeroAgg = (t: number): TeamAgg => ({ ...emptyTeamAgg(t), scoutingExpectedPoints: 0 });
+    const noEpa: EventEpa = {
+      epaByTeam: new Map<number, number | null>([
+        [254, null],
+        [1678, null],
+        [9999, null],
+      ]),
+      available: false,
+      source: 'none',
+      sourceByTeam: new Map([
+        [254, 'none'],
+        [1678, 'none'],
+        [9999, 'none'],
+      ]),
+    };
+    const { getByTestId } = render(
+      <PicklistEpaBoard
+        teams={TEAMS}
+        epa={noEpa}
+        aggByTeam={new Map<number, TeamAgg>([
+          [254, zeroAgg(254)],
+          [1678, zeroAgg(1678)],
+        ])}
+        inListTeams={new Set()}
+        onAdd={onAdd}
+      />,
+    );
+    // Teams with a (zero) in-house estimate get a visible, non-0% bar.
+    const bar254 = getByTestId('epa-board-bar-254');
+    expect(bar254.style.width).not.toBe('0%');
+    expect(bar254.style.width).not.toBe('');
+    const bar1678 = getByTestId('epa-board-bar-1678');
+    expect(bar1678.style.width).not.toBe('0%');
+    // A team with NO estimate at all still renders an empty bar.
+    expect(getByTestId('epa-board-bar-9999').style.width).toBe('0%');
+  });
+
   it('degrades to an empty state when there are no teams', () => {
     const { getByTestId } = render(
       <PicklistEpaBoard

@@ -445,9 +445,13 @@ function ScoutingStatusSummary(props: {
   const [showMissing, setShowMissing] = useState(false);
   const rel = relativeTime(coverage.lastReportAt, nowMs);
   const reported = reports.slice().sort((a, b) => a.station - b.station);
+  // Coverage fullness is measured in STATIONS (6 per match), the same metric the
+  // pill and the heartbeat tile show — never scout-count (a 5-scout roster still
+  // covers 6 stations). BUG-9: the pill read "0/6 stations" but the tone keyed
+  // off scoutsCovered/scoutsTotal, conflating the two.
   const stations = Math.min(coverage.stationsCovered, COVERAGE_STATION_CAP);
   const full = stations >= COVERAGE_STATION_CAP;
-  const tone = statusTone(coverage.scoutsCovered, coverage.scoutsTotal);
+  const tone = statusTone(stations, COVERAGE_STATION_CAP);
   const missing = coverage.missingScouts;
 
   return (
@@ -464,7 +468,8 @@ function ScoutingStatusSummary(props: {
           {stations}/{COVERAGE_STATION_CAP} stations
         </span>
         <span className="tabular-nums text-muted-foreground">
-          {coverage.scoutsCovered} synced · last report {rel}
+          {coverage.scoutsCovered} scout{coverage.scoutsCovered === 1 ? '' : 's'} synced · last report{' '}
+          {rel}
         </span>
       </div>
 
@@ -500,7 +505,7 @@ function ScoutingStatusSummary(props: {
             <ChevronDown
               className={cn('size-3.5 transition-transform', showMissing && 'rotate-180')}
             />
-            {missing.length} not reported
+            {missing.length} scout{missing.length === 1 ? '' : 's'} not reported
           </button>
           {showMissing ? (
             <ul className="mt-1 flex flex-col gap-0.5 pl-5">

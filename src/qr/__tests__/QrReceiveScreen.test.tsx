@@ -67,6 +67,17 @@ vi.mock('@/qr/compress', () => ({
 const saveReport = vi.fn();
 vi.mock('@/db/localStore', () => ({ saveReport: (...a: unknown[]) => saveReport(...a) }));
 
+// BUG-7 gate: QrReceiveScreen now requires a selected scouter before showing the
+// scanner (mirrors ScoutHome's name gate). These tests exercise the scanner, so
+// stand in a resolved, signed-in scouter and a not-logged-out state.
+vi.mock('@/auth/useSession', () => ({
+  useSession: () => ({ scout: { id: 'scout-1', display_name: 'Receiver', event_key: '2026test' }, loading: false }),
+}));
+vi.mock('@/roster/selectScouter', async (orig) => ({
+  ...(await orig<typeof import('@/roster/selectScouter')>()),
+  isScouterLoggedOut: () => false,
+}));
+
 import QrReceiveScreen from '@/qr/QrReceiveScreen';
 import { FountainEncoder, frameToString, reportsToBytes } from '@/qr/envelope';
 import { sampleUpsertPayloads } from './fixtures';

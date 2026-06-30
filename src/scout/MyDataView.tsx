@@ -149,28 +149,28 @@ export default function MyDataView(): JSX.Element {
                 {r.notes}
               </p>
             )}
-            {/* Per-row action footer. Editable reports get an Edit button that
-                re-opens the correction flow; a dead-lettered (error) report shows
-                no Edit and instead links to /sync to resolve the failure first. */}
-            <div className="mt-2 flex items-center justify-end">
+            {/* Per-row action footer. Every report gets an Edit button that re-opens
+                the correction flow. A dead-lettered (error) report ALSO shows a
+                "failed to sync" tag next to Edit: correcting its match/team (the
+                usual cause of an FK dead-letter) and re-saving is the recovery path
+                (BUG-4), so Edit must stay available for error rows too. */}
+            <div className="mt-2 flex items-center justify-end gap-3">
               {r.syncState === 'error' ? (
-                <Link
+                <span
                   data-testid={`my-data-needs-sync-${r.id}`}
-                  to="/sync"
-                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  className="text-xs font-medium text-destructive"
                 >
-                  needs sync fix
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  data-testid={`my-data-edit-${r.id}`}
-                  onClick={() => navigate(`/scout?edit=${r.id}`)}
-                  className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md border border-border px-3 text-sm font-medium hover:bg-accent"
-                >
-                  <Pencil className="size-4" /> Edit
-                </button>
-              )}
+                  failed to sync — fix &amp; re-save
+                </span>
+              ) : null}
+              <button
+                type="button"
+                data-testid={`my-data-edit-${r.id}`}
+                onClick={() => navigate(`/scout?edit=${r.id}`)}
+                className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md border border-border px-3 text-sm font-medium hover:bg-accent"
+              >
+                <Pencil className="size-4" /> Edit
+              </button>
             </div>
           </li>
         ))}

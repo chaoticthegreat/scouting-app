@@ -1,6 +1,11 @@
 // src/sync/__tests__/classifyError.test.ts
 import { describe, it, expect } from 'vitest';
-import { classifySyncError, isAuthClassError, isSupersedeRecoverable } from '../classifyError';
+import {
+  classifySyncError,
+  isAuthClassError,
+  isSupersedeRecoverable,
+  isOrphanedScoutRecoverable,
+} from '../classifyError';
 
 describe('classifySyncError', () => {
   describe('transient (→ retry with backoff)', () => {
@@ -106,6 +111,34 @@ describe('isSupersedeRecoverable', () => {
     expect(isSupersedeRecoverable('Failed to fetch')).toBe(false);
     expect(isSupersedeRecoverable(null)).toBe(false);
     expect(isSupersedeRecoverable(undefined)).toBe(false);
+  });
+});
+
+describe('isOrphanedScoutRecoverable (BUG-6: narrowed so a real match/team FK stays terminal)', () => {
+  it('matches a genuinely scout-related FK failure', () => {
+    expect(isOrphanedScoutRecoverable('invalid scout_id')).toBe(true);
+    expect(isOrphanedScoutRecoverable('no such scout for this event')).toBe(true);
+    expect(
+      isOrphanedScoutRecoverable('insert violates foreign key constraint on scout_id'),
+    ).toBe(true);
+  });
+
+  it('does NOT match a match_key / target_team FK violation (the BUG-1 dead-letter)', () => {
+    // Postgres uses 23503 for ALL foreign-key violations; the bare code must no
+    // longer flag a bad-match-key dead-letter as recoverable, or it would be
+    // pointlessly auto-requeued and just dead-letter again.
+    expect(
+      isOrphanedScoutRecoverable(
+        'insert or update violates foreign key constraint "match_scouting_report_match_key_fkey" (23503)',
+      ),
+    ).toBe(false);
+    expect(
+      isOrphanedScoutRecoverable(
+        'violates foreign key constraint "match_scouting_report_target_team_number_fkey"',
+      ),
+    ).toBe(false);
+    expect(isOrphanedScoutRecoverable(null)).toBe(false);
+    expect(isOrphanedScoutRecoverable(undefined)).toBe(false);
   });
 });
 

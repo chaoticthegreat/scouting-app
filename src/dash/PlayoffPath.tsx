@@ -196,9 +196,18 @@ export default function PlayoffPath(props: PlayoffPathProps): JSX.Element {
   const set = sfSet(current.row);
 
   if (current.isFinal || set == null) {
-    // Finals (best of 3): the series win is the whole story.
-    const ourWins = ourOrdered.filter((o) => o.isFinal && ourSide(o.row, baseTeam)?.color === o.row.winner).length;
-    const oppWins = ourOrdered.filter((o) => o.isFinal && isPlayed(o.row) && ourSide(o.row, baseTeam)?.color !== o.row.winner).length;
+    // Finals (best of 3): the series win is the whole story. Only count games
+    // with a DEFINITE winner — a played-but-tied final (winner == null) is a win
+    // for neither side (previously it was mis-counted as an opponent win because
+    // `ourColor !== null` is always true).
+    const ourWins = ourOrdered.filter(
+      (o) => o.isFinal && o.row.winner != null && ourSide(o.row, baseTeam)?.color === o.row.winner,
+    ).length;
+    const oppWins = ourOrdered.filter((o) => {
+      if (!o.isFinal || o.row.winner == null) return false;
+      const ourColor = ourSide(o.row, baseTeam)?.color;
+      return ourColor != null && ourColor !== o.row.winner;
+    }).length;
     return (
       <div data-testid={testid} className="flex flex-col gap-2.5">
         <div data-testid={`${testid}-current`} className="rounded-xl border border-red-500/40 bg-card/70 p-3">

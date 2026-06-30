@@ -26,7 +26,7 @@ import {
   markScouterLoggedOut,
 } from '@/roster/selectScouter';
 import { UpcomingMatches, matchLabelFromKey } from '@/capture/UpcomingMatches';
-import { getCachedAssignments, getCachedRoster } from '@/db/preloadClient';
+import { getCachedAssignments, getCachedRoster, getCachedMatches, getCachedTeams } from '@/db/preloadClient';
 import { OfflineReadyBadge } from '@/offline/OfflineReadyBadge';
 import { cn } from '@/lib/utils';
 
@@ -36,6 +36,31 @@ interface AssignmentRow {
   station: 1 | 2 | 3;
   target_team_number: number;
   event_key: string;
+}
+
+/**
+ * Normalize a free-text manual match entry into the CANONICAL `<eventKey>_qm<n>`
+ * key the `match` table is keyed on. The Manual-pick field is forgiving — a scout
+ * may type a bare number ("10"), a level-prefixed token ("qm10" / "q10"), or paste
+ * a full key ("2026txhou1_qm10"). Without this, "10" was stored verbatim as the
+ * match_key and the `match_scouting_report.match_key → match` FK rejected it on
+ * sync, dead-lettering the report permanently (BUG-1 data loss).
+ *
+ * Manual quals only: a bare number / "q"/"qm" token always maps to a QUAL key.
+ * A pasted full key (contains "_") is trusted as-is (lets a scout enter a playoff
+ * match explicitly). Returns '' when nothing parseable was entered.
+ */
+export function normalizeManualMatchKey(raw: string, eventKey: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  // A full key already carries its event code + level — trust it verbatim.
+  if (trimmed.includes('_')) return trimmed;
+  // Strip a leading level token ("q"/"qm") then take the trailing number.
+  const m = trimmed.match(/^(?:qm|q)?\s*0*(\d+)$/i);
+  if (!m) return '';
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return eventKey ? `${eventKey}_qm${n}` : `qm${n}`;
 }
 
 // A readable label for a saved draft (e.g. "Qualification 9 · Team 111") instead
@@ -249,6 +274,20 @@ export default function ScoutHome() {
   const [alliance, setAlliance] = useState<'red' | 'blue'>('red');
   const [station, setStation] = useState<1 | 2 | 3>(1);
   const [team, setTeam] = useState('');
+  // Manual-pick validation: a warning shown when the typed match/team don't match
+  // the loaded event schedule/roster (a bad manual entry dead-letters on the FK).
+  const [manualWarning, setManualWarning] = useState<string | null>(null);
+  // When correcting a DEAD-LETTERED report whose match/team is wrong, the manual
+  // pick re-saves IN PLACE under this id (instead of creating a new report). Set by
+  // the edit deep-link for an 'error' report; cleared once the capture starts.
+  const [fixingReportId, setFixingReportId] = useState<string | null>(null);
+
+  // Loaded event schedule + team list (from the offline preload cache) used to
+  // validate a manual pick before it can dead-letter on the match/team FK (BUG-1).
+  // Best-effort: when the cache is empty (never preloaded) validation is skipped
+  // and the normalized key is trusted, so a fully-offline fresh device still works.
+  const [knownMatchKeys, setKnownMatchKeys] = useState<Set<string>>(new Set());
+  const [knownTeams, setKnownTeams] = useState<Set<number>>(new Set());
 
   const refreshLocal = async () => {
     setDrafts(await listDrafts());
@@ -304,12 +343,36 @@ export default function ScoutHome() {
     };
   }, [scoutId, effective?.display_name, effective?.event_key, activeEvent]);
 
+  // Load the cached event schedule + team list so a manual pick can be validated
+  // against them before it's allowed to start (and thus before it can dead-letter
+  // on the match/team FK). Keyed on the active event; best-effort + offline-safe.
+  const validationEventKey = activeEvent || effective?.event_key || '';
+  useEffect(() => {
+    if (!validationEventKey) return;
+    let cancelled = false;
+    void (async () => {
+      const [matches, teams] = await Promise.all([
+        getCachedMatches(validationEventKey),
+        getCachedTeams(validationEventKey),
+      ]);
+      if (cancelled) return;
+      setKnownMatchKeys(new Set(matches.map((m) => m.match_key)));
+      setKnownTeams(new Set(teams.map((t) => t.team_number)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [validationEventKey]);
+
   // Report-correction deep link: /scout?edit=<reportId>. Gated on the scouter
   // gate being satisfied (so the param is preserved until a name is picked). Loads
-  // the report, and if eligible (syncState !== 'error') reconstructs a CaptureTarget
-  // from its own fields with editingReportId set, forces match mode, and clears the
-  // edit param so a reload/back doesn't re-trigger. No `deleted` check — the local
-  // row has no `deleted` field (see docs/plans/report-correction.md §1).
+  // the report and reconstructs a CaptureTarget from its own fields with
+  // editingReportId set, forces match mode, and clears the edit param so a
+  // reload/back doesn't re-trigger. DEAD-LETTERED ('error') reports are editable
+  // too: correcting the bad match/team that caused the FK dead-letter (BUG-1) is
+  // the recovery path — re-saving re-validates and clears the error (BUG-4). No
+  // `deleted` check — the local row has no `deleted` field (see
+  // docs/plans/report-correction.md §1).
   const editId = searchParams.get('edit');
   useEffect(() => {
     if (!effective || !editId) return;
@@ -327,8 +390,22 @@ export default function ScoutHome() {
         },
         { replace: true },
       );
-      if (!r || r.syncState === 'error') return; // not found / ineligible: fall through
+      if (!r) return; // not found: fall through
       setEditingRev(r.rowRevision ?? 1);
+      if (r.syncState === 'error') {
+        // A dead-lettered report is most likely stuck on a bad match/team FK
+        // (BUG-1). The capture/review flow can't change the target match/team, so
+        // route the correction through the manual-pick form pre-filled with the
+        // report's values; "Start capture" then re-normalizes + re-validates them
+        // (BUG-1) and re-saves IN PLACE under this id (BUG-4).
+        setFixingReportId(r.id);
+        setMatchKey(r.matchKey);
+        setAlliance(r.allianceColor);
+        setStation(r.station);
+        setTeam(String(r.targetTeamNumber));
+        setManualWarning('This report failed to sync — fix the match/team below, then Start to re-save.');
+        return;
+      }
       setActive({
         eventKey: r.eventKey,
         matchKey: r.matchKey,
@@ -431,15 +508,42 @@ export default function ScoutHome() {
   };
 
   const startManual = () => {
+    // Normalize the free-text match field into the canonical `<eventKey>_qm<n>`
+    // key so the report never dead-letters on the match FK (BUG-1).
+    const normalizedKey = normalizeManualMatchKey(matchKey, eventKey);
+    const targetTeam = Number(team);
+    if (!normalizedKey) {
+      setManualWarning('Enter a match number (e.g. 10, qm10) — couldn’t read that.');
+      return;
+    }
+    // Validate against the loaded schedule/roster when we HAVE them. An empty cache
+    // (never preloaded / fully offline fresh device) means we can't validate — trust
+    // the normalized key rather than block a legitimate offline capture.
+    if (knownMatchKeys.size > 0 && !knownMatchKeys.has(normalizedKey)) {
+      setManualWarning(
+        `Match ${matchLabelFromKey(normalizedKey)} isn’t in this event’s schedule — check the number.`,
+      );
+      return;
+    }
+    if (knownTeams.size > 0 && (!Number.isFinite(targetTeam) || !knownTeams.has(targetTeam))) {
+      setManualWarning(`Team ${team || '—'} isn’t in this event — check the number.`);
+      return;
+    }
+    setManualWarning(null);
     setActive({
       eventKey,
-      matchKey,
+      matchKey: normalizedKey,
       scoutId,
       scoutName: effective.display_name,
-      targetTeamNumber: Number(team),
+      targetTeamNumber: targetTeam,
       allianceColor: alliance,
       station,
+      // Correcting a dead-lettered report → re-save in place under its id (the
+      // session reconstitutes its data and bumps the revision). A normal manual
+      // pick leaves this undefined and creates a fresh report.
+      ...(fixingReportId ? { editingReportId: fixingReportId } : {}),
     });
+    setFixingReportId(null);
   };
 
   const onExport = async () => {
@@ -613,6 +717,11 @@ export default function ScoutHome() {
             <Input id="mp-team" type="number" value={team} onChange={(e) => setTeam(e.target.value)} className="min-h-[44px] text-base" />
           </div>
         </div>
+        {manualWarning ? (
+          <p data-testid="scout-manual-warning" className="mt-2 text-sm text-destructive">
+            {manualWarning}
+          </p>
+        ) : null}
         <Button
           data-testid="scout-start-capture"
           variant="brand"

@@ -1,16 +1,21 @@
 // supabase/functions/ingest-reports/index.ts
-// QR/cross-scout ingest path: any joined event member may submit reports for
-// THEIR events. Authorization is JWT event-membership (the HMAC model is gone).
+// QR/cross-scout ingest path: the receiving device submits reports authored on
+// ANOTHER device. Authorization is the receiver's JWT (the HMAC model is gone).
 //
 // Gate (mirrors the import-event admin-gate pattern):
 //   1. Read the Authorization header (the receiver's session JWT). 401 if absent.
 //   2. Build a caller client bound to that JWT (anon key) and call
-//      get_my_event_keys() → string[]. 403 if it errors or is empty (not a member).
-//   3. Pre-check every report.event_key is a string ∈ the caller's events; if any
-//      is not, 403 and write NOTHING (a bad batch must not partially land).
+//      get_my_event_keys() → string[] to learn the receiver's events.
+//   3. Validate every report.event_key. A receiver WITH events may only ingest
+//      into those events. A receiver with NO events (BUG-7: this device hasn't
+//      picked a scouter yet, so it has no scout row and get_my_event_keys() is
+//      EMPTY) must NOT 403 the whole backlog — instead every report.event_key is
+//      validated against the `event` table directly (service role). Either way a
+//      bad batch writes NOTHING (an unknown event_key 403s before any write).
 //   4. Upsert with a service-role client (auth.uid() NULL ⇒ the upsert_match_report
-//      ownership gate is exempt) so QR can carry OTHER scouts' reports. The RPC is
-//      revision-guarded ⇒ re-ingesting the same id+revision is an idempotent no-op.
+//      ownership gate is exempt; it RESOLVES/PROVISIONS the scout row per 0022/0032)
+//      so QR can carry OTHER scouts' reports. The RPC is revision-guarded ⇒
+//      re-ingesting the same id+revision is an idempotent no-op.
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -51,8 +56,7 @@ Deno.serve(async (req) => {
     return json({ error: "missing authorization" }, 401);
   }
 
-  // (2) Membership gate: bind a caller client to the JWT and ask which events
-  //     this caller is a member of.
+  // (2) Look up the receiver's events (which events this caller is a member of).
   const caller = createClient(SUPABASE_URL, ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
     auth: { persistSession: false, autoRefreshToken: false },
@@ -60,16 +64,26 @@ Deno.serve(async (req) => {
   const { data: myEvents, error: eventsErr } = await caller.rpc(
     "get_my_event_keys",
   );
-  // Distinguish a transient lookup failure (retryable) from a genuine
-  // non-member (terminal). A DB/network error must NOT be reported as 403, or
-  // the receiver would treat a recoverable blip as "you're not allowed".
+  // Distinguish a transient lookup failure (retryable) from a legitimate empty
+  // result. A DB/network error must NOT be silently treated as "no events", or a
+  // recoverable blip would route a member through the looser event-table fallback.
   if (eventsErr) {
     return json({ error: "membership lookup failed" }, 503);
   }
-  if (!Array.isArray(myEvents) || myEvents.length === 0) {
-    return json({ error: "forbidden: not an event member" }, 403);
-  }
-  const memberEvents = new Set<string>(myEvents as string[]);
+  // BUG-7: a receiver that hasn't picked a scouter yet has NO scout row, so
+  // get_my_event_keys() is EMPTY. Do NOT 403 the whole backlog — fall back to
+  // validating each report's event_key against the `event` table (service role).
+  // The whole point of QR is recovering a sender on a device that may not itself
+  // be a member; the service-role upsert resolves/provisions the scout row anyway.
+  const memberEvents = new Set<string>(
+    Array.isArray(myEvents) ? (myEvents as string[]) : [],
+  );
+
+  // Service-role client: used both for the event-existence fallback and the
+  // ownership-exempt, revision-guarded upsert loop.
+  const svc = createClient(SUPABASE_URL, SERVICE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 
   // Parse the body: { reports: [...] }. No HMAC.
   let payload: IngestPayload;
@@ -84,12 +98,32 @@ Deno.serve(async (req) => {
   }
 
   // (3) Pre-check EVERY report's event_key BEFORE any write so a bad batch
-  //     writes nothing.
+  //     writes nothing. A member is restricted to their OWN events; a receiver
+  //     with no events validates each key against real, existing events instead.
+  const knownEvents = new Set<string>(memberEvents);
   for (const report of payload.reports) {
     const eventKey = report?.event_key;
-    if (typeof eventKey !== "string" || !memberEvents.has(eventKey)) {
+    if (typeof eventKey !== "string") {
+      return json({ error: "forbidden: report missing event_key" }, 403);
+    }
+    if (knownEvents.has(eventKey)) continue;
+    if (memberEvents.size > 0) {
+      // Caller IS a member of some events — they may only ingest into those.
       return json({ error: "forbidden: report outside your events" }, 403);
     }
+    // Scouter-less receiver: accept the key only if it names a REAL event.
+    const { data: ev, error: evErr } = await svc
+      .from("event")
+      .select("event_key")
+      .eq("event_key", eventKey)
+      .maybeSingle();
+    if (evErr) {
+      return json({ error: "event lookup failed" }, 503);
+    }
+    if (!ev) {
+      return json({ error: "forbidden: unknown event" }, 403);
+    }
+    knownEvents.add(eventKey); // cache so repeats in the batch don't re-query
   }
 
   // (4) Service-role upsert loop (ownership gate exempt; revision-guarded).
@@ -97,10 +131,6 @@ Deno.serve(async (req) => {
   //     partial-commits-then-400 and strands the rest. The revision guard makes
   //     re-sending the whole batch idempotent, so the receiver can safely re-send
   //     to retry only the failures.
-  const svc = createClient(SUPABASE_URL, SERVICE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
   let ingested = 0;
   const failed: { index: number; error: string }[] = [];
   for (let index = 0; index < payload.reports.length; index++) {

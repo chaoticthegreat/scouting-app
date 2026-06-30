@@ -8,6 +8,7 @@
 // The data fetch is isolated in `fetchCoverage` (which only touches the
 // supabase client) so tests can drive it by mocking `@/lib/supabase`.
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useSession } from '@/auth/useSession';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -96,7 +97,23 @@ function LocalOutbox(): JSX.Element {
                   data-testid="local-outbox-deadletter"
                   className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm"
                 >
-                  <div className="font-semibold">{d.label}</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="font-semibold">{d.label}</div>
+                    {/* A pure "Retry all" just re-runs the identical broken payload
+                        and re-dead-letters (BUG-3). The real fix for a match report
+                        is to CORRECT the bad match/team and re-save, so link each
+                        match dead-letter to its editor. (Pit reports have no in-app
+                        editor yet, so they only get Retry.) */}
+                    {d.kind === 'match' ? (
+                      <Link
+                        data-testid="local-outbox-fix"
+                        to={`/scout?edit=${d.id}`}
+                        className="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium hover:bg-accent"
+                      >
+                        Fix &amp; re-save
+                      </Link>
+                    ) : null}
+                  </div>
                   {d.error ? (
                     <div className="mt-0.5 text-xs text-destructive [overflow-wrap:anywhere]">
                       {d.error}

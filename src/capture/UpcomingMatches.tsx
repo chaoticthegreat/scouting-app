@@ -8,6 +8,8 @@ import { parseNexusEventStatus, type NexusEventStatus } from '@/dash/nexusClient
 import { NEXUS_POLL_MS } from '@/dash/constants';
 import { getCachedMatches } from '@/db/preloadClient';
 import { cn } from '@/lib/utils';
+import { OnDeckAlert } from '@/capture/OnDeckAlert';
+import { selectOnDeck, nexusStatusForKey } from '@/capture/onDeck';
 
 /** Raw `match` row shape we care about for the scout's match list. */
 export interface UpcomingMatchRow {
@@ -156,19 +158,8 @@ export function assignmentKey(a: Pick<ScoutAssignment, 'match_key' | 'target_tea
  * since Nexus labels ("Qualification 73") differ from our keys ("..._qm73").
  */
 function liveStatusForKey(status: NexusEventStatus | null, key: string): string | null {
-  if (!status) return null;
-  const parts = parseMatchKeyParts(key);
-  if (!parts) return null;
-  const levelHint = parts.comp.charAt(0).toLowerCase(); // 'q','s','f' …
-  const hit = status.matches.find((nm) => {
-    const lbl = nm.label.trim().toLowerCase();
-    return lbl.endsWith(` ${parts.num}`) && lbl.startsWith(levelHint);
-  });
-  if (!hit) return null;
-  const s = (hit.status ?? '').trim().toLowerCase();
-  if (s === 'now queuing' || s === 'on deck' || s === 'on field') {
-    return hit.status as string;
-  }
+  const s = nexusStatusForKey(status, key);
+  if (s === 'now queuing' || s === 'on deck' || s === 'on field') return s;
   return null;
 }
 
@@ -277,8 +268,22 @@ export function UpcomingMatches({
   const shown = view === 'done' ? doneList : view === 'missed' ? missedList : todoList;
   const hasAny = todoList.length > 0 || doneList.length > 0 || missedList.length > 0;
 
+  // "You're on deck" alert: most-urgent imminent assigned match, driven by live
+  // Nexus status (degrades to schedule-time when Nexus is unavailable). todoList
+  // is already sorted soonest-first, exactly what selectOnDeck expects.
+  const onDeck = selectOnDeck(
+    todoList.map((e) => e.assignment),
+    nexus,
+    (a) => byKey.get(a.match_key)?.scheduled_time ?? null,
+  );
+
   return (
     <section data-testid="scout-upcoming-matches">
+      {onDeck ? (
+        <div className="mb-3">
+          <OnDeckAlert result={onDeck} onStart={onStart} />
+        </div>
+      ) : null}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <CalendarClock className="size-5 text-brand" /> Your matches to scout

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useId } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { getStoredActiveEvent, setStoredActiveEvent } from './activeEventStore';
@@ -34,6 +34,13 @@ interface EventRow {
 export function useActiveEvent(): ActiveEvent {
   const stored = getStoredActiveEvent();
   const queryClient = useQueryClient();
+  // Unique per hook instance. This hook mounts in BOTH DashboardScreen and its
+  // child SetupTab at once; a shared fixed channel topic made the second mount
+  // reuse the first's already-subscribed channel, and adding a postgres_changes
+  // listener after subscribe() throws ("cannot add postgres_changes callbacks
+  // for realtime:active-event after subscribe()"). A per-instance topic keeps the
+  // two subscriptions independent.
+  const channelId = useId();
 
   const query = useQuery({
     queryKey: ACTIVE_EVENT_KEY,
@@ -73,7 +80,7 @@ export function useActiveEvent(): ActiveEvent {
   useEffect(() => {
     if (typeof supabase.channel !== 'function') return;
     const channel = supabase
-      .channel('active-event')
+      .channel(`active-event-${channelId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'event' },
@@ -85,7 +92,7 @@ export function useActiveEvent(): ActiveEvent {
     return () => {
       if (typeof supabase.removeChannel === 'function') supabase.removeChannel(channel);
     };
-  }, [queryClient]);
+  }, [queryClient, channelId]);
 
   return {
     eventKey: query.data ?? stored ?? null,
